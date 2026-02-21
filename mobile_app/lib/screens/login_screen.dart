@@ -18,7 +18,6 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   final _passwordController = TextEditingController();
   final VoiceService _voiceService = VoiceService();
   AuraState _auraState = AuraState.idle;
-  bool _isVoiceMode = false;
 
   @override
   void initState() {
@@ -46,7 +45,6 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   Future<void> _startVoiceLogin() async {
     if (!mounted) return;
     setState(() {
-      _isVoiceMode = true;
       _auraState = AuraState.aiSpeaking;
     });
 
@@ -118,41 +116,39 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
 
     return Scaffold(
       backgroundColor: const Color(0xFF000000),
-      resizeToAvoidBottomInset: false, // Keep the background fixed
+      // We set resizeToAvoidBottomInset to true to allow the SingleChildScrollView to work properly
+      resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
-          // Aura Orb Layer
+          // Background Aura Orb (Static/Fixed)
           Positioned.fill(
-            child: GestureDetector(
-              onTap: _startVoiceLogin,
-              child: AuraOrb(state: _auraState),
+            child: IgnorePointer(
+              ignoring: false,
+              child: GestureDetector(
+                onTap: _startVoiceLogin,
+                child: AuraOrb(state: _auraState),
+              ),
             ),
           ),
 
-          // Content Layer
-          Positioned.fill(
-            child: SafeArea(
-              child: SingleChildScrollView(
-                physics: const ClampingScrollPhysics(), // Prevent bounce overscroll
-                padding: EdgeInsets.only(
-                  left: 32.0, 
-                  right: 32.0, 
-                  top: 48.0, 
-                  bottom: MediaQuery.of(context).viewInsets.bottom + 48.0,
-                ),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Text(
-                        "UniElevate",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 48,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 4,
-                        ),
-                      ),
+          // Content Layer (Scrollable to handle keyboard)
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 48.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 20),
+                  const Text(
+                    "UniElevate",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 48,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 4,
+                    ),
+                  ),
                   Text(
                     "Digital Exam System".toUpperCase(),
                     textAlign: TextAlign.center,
@@ -163,18 +159,27 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                       letterSpacing: 2,
                     ),
                   ),
-                  const Spacer(),
+                  
+                  // Use a fixed spacing instead of Spacer inside scroll view
+                  const SizedBox(height: 80),
 
                   // Dynamic Info Panel
                   AnimatedOpacity(
-                    opacity: authProvider.isLoading ? 0.0 : 1.0,
+                    opacity: authProvider.isLoading ? 0.3 : 1.0,
                     duration: const Duration(milliseconds: 300),
                     child: Container(
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.03),
+                        color: Colors.white.withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: Colors.white10),
+                        border: Border.all(color: Colors.white12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            blurRadius: 20,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
                       ),
                       child: Column(
                         children: [
@@ -204,15 +209,23 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                     ),
                   ),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 32),
                   
                   if (authProvider.error != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 24),
-                      child: Text(
-                        authProvider.error!,
-                        style: const TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.2)),
+                        ),
+                        child: Text(
+                          authProvider.error!,
+                          style: const TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w600),
+                          textAlign: TextAlign.center,
+                        ),
                       ),
                     ),
 
@@ -230,21 +243,26 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                         : const Text("ACCESS PORTAL", style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
                   ),
                   
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 24),
                   TextButton(
                     onPressed: _startVoiceLogin,
-                    child: const Text(
-                      "TAP ORB FOR VOICE LOGIN",
-                      style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
+                    child: const Column(
+                      children: [
+                        Icon(Icons.mic_none, color: Colors.cyanAccent, size: 32),
+                        SizedBox(height: 8),
+                        Text(
+                          "TAP ORB FOR VOICE LOGIN",
+                          style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
   }
 }

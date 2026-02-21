@@ -21,7 +21,7 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      // 1. Fetch latest exam to get the current access code
+      // 1. Fetch latest exam to validate the access command
       Exam? exam;
       try {
         exam = await _supabaseService.fetchLatestExam();
@@ -31,74 +31,61 @@ class AuthProvider with ChangeNotifier {
         notifyListeners();
         return false;
       }
-      
+
       if (exam == null) {
-        _error = "Access Refused: No active exam sessions were found in the registry. Please check with your supervisor.";
+        _error = "No active exam found. Please ask your supervisor to deploy an exam first.";
         _isLoading = false;
         notifyListeners();
         return false;
       }
 
-      // 2. Validate the provided password (Access Command) against the exam's access code
-      final expected = (exam.accessCode ?? "").trim().toUpperCase();
-      final received = password.trim().toUpperCase();
-      
-      if (received != expected) {
-        _error = "Invalid Access Command.\nExpected: '$expected'\nReceived: '$received'";
+      // 2. Validate the access command — this is the ONLY gate.
+      // Normalize both sides: strip all spaces, underscores, and hyphens so that
+      // voice-spoken "START NOW" matches a stored code of "START_NOW".
+      String _normalize(String s) => s.trim().toUpperCase().replaceAll(RegExp(r'[\s_\-]+'), '');
+
+      final expected = _normalize(exam.accessCode ?? "");
+      final received = _normalize(password);
+
+      debugPrint('AuthProvider: Access command check — expected: "$expected", received: "$received"');
+
+      if (received != expected || expected.isEmpty) {
+        _error = "Invalid Access Command. Please check the command and try again.";
         _isLoading = false;
         notifyListeners();
         return false;
       }
 
-      // 3. Fetch global shared password from settings
+      // 3. Fetch shared password for Auth provisioning
       final settings = await _supabaseService.fetchSettings();
-      final sharedPassword = settings['global_student_password'];
+      final sharedPassword = settings['global_student_password'] ?? 'haramaya_student_2026';
 
-      // 4. Verify the student exists in the 'profiles' table
-      // In this setup, we use a single Auth account but track individual profiles.
-      // Or if the admin creates individual Auth users with the same password:
-      // We will try to sign in with the student's own email and the shared password.
-      
       String deviceId = await _getDeviceId();
 
-      // 4. Verify student existence and handle account provisioning
+      // 4. Auto-provision: Try sign-in first, then sign-up if no account exists.
+      //    No student_registry check — the correct access command IS the proof of eligibility.
       AuthResponse? response;
       try {
         response = await Supabase.instance.client.auth.signInWithPassword(
-          email: email, 
+          email: email,
           password: sharedPassword,
         );
+        debugPrint('AuthProvider: Existing account signed in for $email');
       } catch (authError) {
         if (authError.toString().contains('429')) {
-           rethrow; // Pass rate limit error up immediately
+          rethrow;
         }
-        
-        // Transparent Auto-Provisioning:
-        // If user doesn't exist in Auth but is in the 'profiles' table (created by Admin)
-        // we sign them up automatically using the shared password.
-        
+        // Account doesn't exist yet — create it automatically
+        debugPrint('AuthProvider: No existing account, auto-provisioning for $email');
         try {
-          final registryCheck = await Supabase.instance.client
-              .from('student_registry')
-              .select()
-              .eq('email', email)
-              .maybeSingle();
-
-          if (registryCheck != null) {
-             // Account exists in registry but not in Auth yet
-             response = await Supabase.instance.client.auth.signUp(
-               email: email,
-               password: sharedPassword,
-               data: {'name': registryCheck['name']},
-             );
-          } else {
-             _error = "Access Denied: You are not registered for this exam portal. Please contact the administrator.";
-             _isLoading = false;
-             notifyListeners();
-             return false;
-          }
-        } catch (provisioningError) {
-          _error = "System error during account verification: ${provisioningError.toString()}";
+          response = await Supabase.instance.client.auth.signUp(
+            email: email,
+            password: sharedPassword,
+            data: {'name': email.split('@')[0]},
+          );
+          debugPrint('AuthProvider: Auto-provisioned new account for $email');
+        } catch (signUpError) {
+          _error = "Failed to create account: ${signUpError.toString()}";
           _isLoading = false;
           notifyListeners();
           return false;
@@ -106,34 +93,41 @@ class AuthProvider with ChangeNotifier {
       }
 
       if (response != null && response.user != null) {
+        debugPrint('AuthProvider: Login successful for ${response.user!.id}. Syncing profile...');
+        
         // 5. Device Binding Logic (with retry and auto-healing)
-        Map<String, dynamic>? profile = await _lookupProfile(response.user!.id);
+        Map<String, dynamic>? profile;
+        try {
+          profile = await _lookupProfile(response.user!.id);
+          debugPrint('AuthProvider: Initial profile lookup result: $profile');
+        } catch (e) {
+          debugPrint('AuthProvider: Initial lookup FAILED with error: $e');
+        }
         
         if (profile == null) {
-          // Trigger might have missed it or was slow. Try to "heal" the profile.
+          debugPrint('AuthProvider: Profile missing. Auto-creating profile...');
           try {
-             final registryCheck = await Supabase.instance.client
-                .from('student_registry')
-                .select()
-                .eq('email', email)
-                .maybeSingle();
-             
-             await Supabase.instance.client.from('profiles').upsert({
-               'id': response.user!.id,
-               'email': email,
-               'name': registryCheck?['name'] ?? email.split('@')[0],
-               'role': 'student'
-             });
-             
-             // Try lookup one last time
-             profile = await _lookupProfile(response.user!.id);
+            final upsertData = {
+              'id': response.user!.id,
+              'email': email,
+              'name': email.split('@')[0],
+              'role': 'student'
+            };
+            debugPrint('AuthProvider: Performing profile upsert: $upsertData');
+
+            await Supabase.instance.client.from('profiles').upsert(upsertData).select().maybeSingle();
+
+            // Try lookup one last time
+            profile = await _lookupProfile(response.user!.id);
+            debugPrint('AuthProvider: Post-creation lookup result: $profile');
           } catch (e) {
-            debugPrint("Auto-healing failed: $e");
+            debugPrint("AuthProvider: Profile creation CRITICALLY failed: $e");
           }
         }
         
         if (profile == null) {
-          _error = "Profile synchronization failed. Please try again in a moment.";
+          debugPrint('AuthProvider: Profile synchronization failed after all attempts.');
+          _error = "Profile synchronization failed. Please contact your administrator and try again.";
           _isLoading = false;
           notifyListeners();
           return false;
@@ -193,7 +187,7 @@ class AuthProvider with ChangeNotifier {
   Future<Map<String, dynamic>?> _lookupProfile(String userId) async {
     return await Supabase.instance.client
         .from('profiles')
-        .select('device_id')
+        .select('*')
         .eq('id', userId)
         .maybeSingle();
   }
