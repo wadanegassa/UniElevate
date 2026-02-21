@@ -67,6 +67,12 @@ class _ExamCreationScreenState extends State<ExamCreationScreen> {
                     FormBuilderValidators.numeric(),
                   ]),
                 ),
+                const SizedBox(height: 16),
+                FormBuilderTextField(
+                  name: 'access_code',
+                  decoration: _inputDecoration("Student Access Command (Password)"),
+                  validator: FormBuilderValidators.required(),
+                ),
               ],
             ),
             
@@ -102,6 +108,7 @@ class _ExamCreationScreenState extends State<ExamCreationScreen> {
                     id: '',
                     title: values['title'],
                     duration: int.parse(values['duration']),
+                    accessCode: values['access_code'],
                   );
                   
                   // In a real app, you'd extract question values from the form too

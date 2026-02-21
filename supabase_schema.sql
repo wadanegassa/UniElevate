@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS exams (
     duration INTEGER NOT NULL,
     start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     end_time TIMESTAMP WITH TIME ZONE,
+    access_code TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

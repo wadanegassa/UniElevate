@@ -20,18 +20,38 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
+      // 1. Fetch latest exam to get the current access code
+      final exam = await _supabaseService.fetchLatestExam();
+      
+      if (exam == null) {
+        _error = "No active exam found.";
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      // 2. Validate the provided password (Access Command) against the exam's access code
+      if (password != exam.accessCode) {
+        _error = "Invalid Access Command for the current exam.";
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      // 3. Perform silent login for the unified student account
+      // Note: Admin must ensure student@haramaya.com exists with this static password
       final response = await Supabase.instance.client.auth.signInWithPassword(
-        email: email,
-        password: password,
+        email: 'student@haramaya.com',
+        password: 'student_access_2026',
       );
 
       if (response.user != null) {
         String deviceId = await _getDeviceId();
-        bool isBound = await _supabaseService.verifyDeviceBinding(email, deviceId);
+        bool isBound = await _supabaseService.verifyDeviceBinding('student@haramaya.com', deviceId);
         
         if (!isBound) {
           await Supabase.instance.client.auth.signOut();
-          _error = "This device is not registered for this account.";
+          _error = "This device is not registered for the exam.";
           _isLoading = false;
           notifyListeners();
           return false;
@@ -43,7 +63,7 @@ class AuthProvider with ChangeNotifier {
         return true;
       }
     } catch (e) {
-      _error = e.toString();
+      _error = "Access Denied: ${e.toString()}";
     }
 
     _isLoading = false;

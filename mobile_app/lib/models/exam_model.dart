@@ -6,6 +6,7 @@ class Exam {
   final int duration;
   final DateTime? startTime;
   final DateTime? endTime;
+  final String? accessCode;
   final List<Question> questions;
 
   Exam({
@@ -14,6 +15,7 @@ class Exam {
     required this.duration,
     this.startTime,
     this.endTime,
+    this.accessCode,
     this.questions = const [],
   });
 
@@ -24,6 +26,7 @@ class Exam {
       duration: json['duration'],
       startTime: json['start_time'] != null ? DateTime.parse(json['start_time']) : null,
       endTime: json['end_time'] != null ? DateTime.parse(json['end_time']) : null,
+      accessCode: json['access_code'],
       questions: questions,
     );
   }
