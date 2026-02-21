@@ -26,19 +26,28 @@ CREATE TABLE IF NOT EXISTS questions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 4. Create Students table
-CREATE TABLE IF NOT EXISTS students (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name TEXT NOT NULL,
+-- 4. Create Role Enum
+DO $$ BEGIN
+    CREATE TYPE user_role AS ENUM ('admin', 'student');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- 5. Create Profiles table
+-- This table matches auth.users and holds role/device information
+CREATE TABLE IF NOT EXISTS profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email TEXT UNIQUE NOT NULL,
-    assigned_exam_ids UUID[] DEFAULT '{}',
+    name TEXT,
+    role user_role DEFAULT 'student',
     device_id TEXT,
+    assigned_exam_ids UUID[] DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 5. Create Answers table
+-- 6. Create Answers table
 CREATE TABLE IF NOT EXISTS answers (
-    student_id UUID REFERENCES students(id),
+    student_id UUID REFERENCES profiles(id),
     question_id UUID REFERENCES questions(id),
     transcript TEXT NOT NULL,
     is_correct BOOLEAN DEFAULT FALSE,
@@ -48,9 +57,18 @@ CREATE TABLE IF NOT EXISTS answers (
     PRIMARY KEY (student_id, question_id, timestamp)
 );
 
--- 6. Enable Realtime for Monitoring
--- Note: You might need to go to Database -> Replication -> supabase_realtime to manage these via UI
--- but these commands attempt to enable them.
+-- 7. Enable RLS and Realtime
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE exams ENABLE ROW LEVEL SECURITY;
+ALTER TABLE questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE answers ENABLE ROW LEVEL SECURITY;
+
+-- Simple RLS Policies (Allow authenticated users to read)
+CREATE POLICY "Allow public read for exams" ON exams FOR SELECT USING (true);
+CREATE POLICY "Allow public read for questions" ON questions FOR SELECT USING (true);
+CREATE POLICY "Allow users to read their own profile" ON profiles FOR SELECT USING (auth.uid() = id);
+
+-- Realtime Configuration
 ALTER PUBLICATION supabase_realtime ADD TABLE answers;
-ALTER PUBLICATION supabase_realtime ADD TABLE students;
+ALTER PUBLICATION supabase_realtime ADD TABLE profiles;
 ALTER PUBLICATION supabase_realtime ADD TABLE exams;

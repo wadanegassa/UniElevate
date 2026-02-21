@@ -25,8 +25,16 @@ class AuthProvider with ChangeNotifier {
       final response = await _supabaseService.signIn(email, password);
       final user = response.user;
       
-      // Security Check: Only allow access if role metadata is 'admin'
-      if (user?.userMetadata?['role'] != 'admin') {
+      if (user == null) throw "Authentication failed.";
+
+      // Security Check: Look up the profile to verify the role
+      final profile = await Supabase.instance.client
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+
+      if (profile['role'] != 'admin') {
         await _supabaseService.signOut();
         _error = "Access Denied: You do not have administrator privileges.";
         _isLoading = false;
@@ -39,7 +47,7 @@ class AuthProvider with ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = e.toString().contains('406') ? "Invalid email or password" : e.toString();
       _isLoading = false;
       notifyListeners();
       return false;

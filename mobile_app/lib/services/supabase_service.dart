@@ -45,7 +45,7 @@ class SupabaseService {
     // But let's follow the requirement: "Device binding verification via Supabase"
     try {
       final response = await _client
-          .from('students')
+          .from('profiles')
           .select('device_id')
           .eq('email', email)
           .single();

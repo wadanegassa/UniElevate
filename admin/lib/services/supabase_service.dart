@@ -39,16 +39,16 @@ class SupabaseService {
 
   // --- Students ---
   Future<List<Student>> fetchStudents() async {
-    final response = await _client.from('students').select();
+    final response = await _client.from('profiles').select().eq('role', 'student');
     return (response as List).map((s) => Student.fromJson(s)).toList();
   }
 
   Future<void> assignExamToStudent(String studentId, String examId) async {
-    final student = await _client.from('students').select().eq('id', studentId).single();
+    final student = await _client.from('profiles').select().eq('id', studentId).single();
     List<String> exams = List<String>.from(student['assigned_exam_ids'] ?? []);
     if (!exams.contains(examId)) {
       exams.add(examId);
-      await _client.from('students').update({'assigned_exam_ids': exams}).eq('id', studentId);
+      await _client.from('profiles').update({'assigned_exam_ids': exams}).eq('id', studentId);
     }
   }
 
