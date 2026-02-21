@@ -88,7 +88,9 @@ ALTER TABLE answers ENABLE ROW LEVEL SECURITY;
 -- Note: Simplified for hackathon; in production, use auth.uid() checks more strictly.
 CREATE POLICY "Allow public read for exams" ON exams FOR SELECT USING (true);
 CREATE POLICY "Allow public read for questions" ON questions FOR SELECT USING (true);
-CREATE POLICY "Allow users to manage their own profile" ON profiles ALL USING (auth.uid() = id);
+CREATE POLICY "Profiles are viewable by owners" ON profiles FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "Users can insert their own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users can update their own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
 
 -- 10. Enable Realtime Safely
 -- This block ensures each table is added to the publication only once.
@@ -129,7 +131,11 @@ BEGIN
     new.email, 
     COALESCE(registered_name, new.raw_user_meta_data->>'name', 'User'), 
     'student'
-  );
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    name = COALESCE(EXCLUDED.name, public.profiles.name),
+    role = 'student';
 
   -- Cleanup registry
   DELETE FROM public.student_registry WHERE email = new.email;
