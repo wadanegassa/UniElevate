@@ -23,7 +23,18 @@ class AuthProvider with ChangeNotifier {
 
     try {
       final response = await _supabaseService.signIn(email, password);
-      _user = response.user;
+      final user = response.user;
+      
+      // Security Check: Only allow access if role metadata is 'admin'
+      if (user?.userMetadata?['role'] != 'admin') {
+        await _supabaseService.signOut();
+        _error = "Access Denied: You do not have administrator privileges.";
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      _user = user;
       _isLoading = false;
       notifyListeners();
       return true;
