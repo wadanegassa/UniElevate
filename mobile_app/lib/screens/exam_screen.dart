@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/exam_provider.dart';
+import '../providers/auth_provider.dart';
 import '../models/aura_state.dart';
 import '../widgets/aura_orb.dart';
 import '../widgets/live_transcript.dart';
@@ -17,7 +18,11 @@ class _ExamScreenState extends State<ExamScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<ExamProvider>(context, listen: false).startExam();
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final examProvider = Provider.of<ExamProvider>(context, listen: false);
+      if (authProvider.user != null) {
+        examProvider.startExam(studentId: authProvider.user!.id);
+      }
     });
   }
 
@@ -42,14 +47,26 @@ class _ExamScreenState extends State<ExamScreen> {
               left: 0,
               right: 0,
               child: Center(
-                child: Text(
-                  _formatTime(provider.remainingSeconds),
-                  style: const TextStyle(
-                    color: Colors.white38,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w300,
-                    letterSpacing: 2,
-                  ),
+                child: Column(
+                  children: [
+                    Text(
+                      _formatTime(provider.remainingSeconds),
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w300,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      provider.currentExam == null ? "Searching for Active Exam..." : "Exam: ${provider.currentExam!.title}",
+                      style: TextStyle(
+                        color: provider.currentExam == null ? Colors.orangeAccent : Colors.cyanAccent.withValues(alpha: 0.5),
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -73,7 +90,7 @@ class _ExamScreenState extends State<ExamScreen> {
             // Finish Overlay
             if (provider.isFinished)
               Container(
-                color: Colors.black.withOpacity(0.9),
+                color: Colors.black.withValues(alpha: 0.9),
                 child: Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/question_model.dart';
 
@@ -54,7 +55,7 @@ class GradingService {
         feedback: "Interesting perspective. ${containsKeywords ? "You hit several key points." : "Try to be more specific next time."}",
       );
     } catch (e) {
-      print('AI Grading Error: $e');
+      debugPrint('Error grading answer: $e');
       return GradingResult(
         isCorrect: false,
         score: 0.0,

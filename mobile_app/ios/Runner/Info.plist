@@ -45,5 +45,9 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>UniElevate needs access to the microphone for voice-based exam answers.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>UniElevate needs access to speech recognition to transcribe your exam answers.</string>
 </dict>
 </plist>

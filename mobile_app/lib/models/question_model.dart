@@ -24,7 +24,7 @@ class Question {
       id: json['id'],
       examId: json['exam_id'],
       text: json['text'],
-      type: json['type'] == 'MCQ' ? QuestionType.mcq : QuestionType.theory,
+      type: json['type']?.toString().toUpperCase() == 'MCQ' ? QuestionType.mcq : QuestionType.theory,
       options: json['options'] != null ? List<String>.from(json['options']) : null,
       correctAnswer: json['correct_answer'],
       keywords: json['keywords'] != null ? List<String>.from(json['keywords']) : null,

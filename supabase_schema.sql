@@ -16,6 +16,18 @@ CREATE TABLE IF NOT EXISTS exams (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 3.1 Create App Settings table
+CREATE TABLE IF NOT EXISTS app_settings (
+    id TEXT PRIMARY KEY,
+    global_student_password TEXT NOT NULL DEFAULT 'haramaya_student_2026',
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Seed initial settings
+INSERT INTO app_settings (id, global_student_password) 
+VALUES ('main', 'haramaya_student_2026')
+ON CONFLICT (id) DO NOTHING;
+
 -- 4. Create Questions table
 CREATE TABLE IF NOT EXISTS questions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -35,7 +47,14 @@ DO $$ BEGIN
     END IF;
 END $$;
 
--- 6. Create Profiles table
+-- 6. Create Student Registry table (Pre-approved students)
+CREATE TABLE IF NOT EXISTS student_registry (
+    email TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 7. Create Profiles table
 -- IMPORTANT: This table maps to Supabase Auth users
 CREATE TABLE IF NOT EXISTS profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -98,14 +117,23 @@ END $$;
 -- This ensures every new Auth user gets a profile automatically
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
+DECLARE
+  registered_name TEXT;
 BEGIN
+  -- Try to get name from registry
+  SELECT name INTO registered_name FROM public.student_registry WHERE email = new.email;
+
   INSERT INTO public.profiles (id, email, name, role)
   VALUES (
     new.id, 
     new.email, 
-    COALESCE(new.raw_user_meta_data->>'name', 'User'), 
-    'student' -- Default to student; change to 'admin' manually in DB for admins
+    COALESCE(registered_name, new.raw_user_meta_data->>'name', 'User'), 
+    'student'
   );
+
+  -- Cleanup registry
+  DELETE FROM public.student_registry WHERE email = new.email;
+  
   RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
