@@ -68,7 +68,36 @@ CREATE POLICY "Allow public read for exams" ON exams FOR SELECT USING (true);
 CREATE POLICY "Allow public read for questions" ON questions FOR SELECT USING (true);
 CREATE POLICY "Allow users to read their own profile" ON profiles FOR SELECT USING (auth.uid() = id);
 
--- Realtime Configuration
-ALTER PUBLICATION supabase_realtime ADD TABLE answers;
-ALTER PUBLICATION supabase_realtime ADD TABLE profiles;
-ALTER PUBLICATION supabase_realtime ADD TABLE exams;
+-- 8. Enable Realtime Safely
+DO $$
+BEGIN
+  -- Add answers to realtime if not already present
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND schemaname = 'public' 
+    AND tablename = 'answers'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE answers;
+  END IF;
+  
+  -- Add profiles to realtime if not already present
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND schemaname = 'public' 
+    AND tablename = 'profiles'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE profiles;
+  END IF;
+
+  -- Add exams to realtime if not already present
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND schemaname = 'public' 
+    AND tablename = 'exams'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE exams;
+  END IF;
+END $$;
