@@ -52,6 +52,20 @@ class SupabaseService {
     }
   }
 
+  Future<void> createStudent(String name, String email) async {
+    // Note: Creating a profile without an Auth user is only for demo tracking.
+    // In a real app, you would use Supabase Admin API to create the Auth user too.
+    await _client.from('profiles').insert({
+      'name': name,
+      'email': email,
+      'role': 'student',
+    });
+  }
+
+  Future<void> unbindStudent(String studentId) async {
+    await _client.from('profiles').update({'device_id': null}).eq('id', studentId);
+  }
+
   // --- Real-time Monitoring ---
   Stream<List<Answer>> monitorAnswers() {
     return _client

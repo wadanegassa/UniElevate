@@ -50,4 +50,16 @@ class ExamManagerProvider with ChangeNotifier {
     await _supabaseService.assignExamToStudent(studentId, examId);
     await loadInitialData();
   }
+
+  Future<void> createStudent(String name, String email) async {
+    _isLoading = true;
+    notifyListeners();
+    await _supabaseService.createStudent(name, email);
+    await loadInitialData();
+  }
+
+  Future<void> unbindStudent(String studentId) async {
+    await _supabaseService.unbindStudent(studentId);
+    await loadInitialData();
+  }
 }

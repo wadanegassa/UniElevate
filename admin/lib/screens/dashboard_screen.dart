@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/exam_manager_provider.dart';
 import 'monitoring_screen.dart';
+import 'student_management_screen.dart';
 import 'exam_creation_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -14,10 +15,12 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedIndex = 0;
-
+  final List<String> _titles = ["Live Monitoring", "Create Exam", "Student Management"];
+  
   final List<Widget> _screens = [
     const MonitoringScreen(),
     const ExamCreationScreen(),
+    const StudentManagementScreen(),
   ];
 
   @override
@@ -57,6 +60,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 _buildSidebarItem(0, Icons.speed, "Live Monitor"),
                 _buildSidebarItem(1, Icons.add_circle_outline, "Create Exam"),
+                _buildSidebarItem(2, Icons.people_outline, "Students"),
                 const Spacer(),
                 ListTile(
                   leading: const Icon(Icons.logout, color: Colors.white38),
