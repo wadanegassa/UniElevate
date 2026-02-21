@@ -28,15 +28,24 @@ class AuthProvider with ChangeNotifier {
       if (user == null) throw "Authentication failed.";
 
       // Security Check: Look up the profile to verify the role
-      final profile = await Supabase.instance.client
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
+      try {
+        final profile = await Supabase.instance.client
+            .from('profiles')
+            .select('role')
+            .eq('id', user.id)
+            .single();
 
-      if (profile['role'] != 'admin') {
+        if (profile['role'] != 'admin') {
+          await _supabaseService.signOut();
+          _error = "Access Denied: You do not have administrator privileges.";
+          _isLoading = false;
+          notifyListeners();
+          return false;
+        }
+      } catch (e) {
+        // This usually happens if the profile record wasn't created yet
         await _supabaseService.signOut();
-        _error = "Access Denied: You do not have administrator privileges.";
+        _error = "Profile not found. Please ensure your account exists in the 'profiles' table with 'admin' role.";
         _isLoading = false;
         notifyListeners();
         return false;
