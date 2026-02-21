@@ -1,0 +1,105 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/exam_provider.dart';
+import '../models/aura_state.dart';
+import '../widgets/aura_orb.dart';
+import '../widgets/live_transcript.dart';
+
+class ExamScreen extends StatefulWidget {
+  const ExamScreen({super.key});
+
+  @override
+  State<ExamScreen> createState() => _ExamScreenState();
+}
+
+class _ExamScreenState extends State<ExamScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<ExamProvider>(context, listen: false).startExam();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = Provider.of<ExamProvider>(context);
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        onTap: () => provider.startListening(),
+        onLongPress: () => provider.repeatQuestion(),
+        onPanUpdate: (details) {
+          // Detect two-finger swipe - simplified for hackathon
+          // In a real app, use a proper gesture recognizer
+        },
+        child: Stack(
+          children: [
+            // Background elements
+            Positioned(
+              top: 60,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Text(
+                  _formatTime(provider.remainingSeconds),
+                  style: const TextStyle(
+                    color: Colors.white38,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w300,
+                    letterSpacing: 2,
+                  ),
+                ),
+              ),
+            ),
+            
+            // Central Aura Orb
+            Center(
+              child: AuraOrb(state: provider.auraState),
+            ),
+
+            // Live Transcript
+            Positioned(
+              bottom: 40,
+              left: 0,
+              right: 0,
+              child: LiveTranscript(
+                transcript: provider.liveTranscript,
+                isListening: provider.auraState == AuraState.studentSpeaking,
+              ),
+            ),
+
+            // Finish Overlay
+            if (provider.isFinished)
+              Container(
+                color: Colors.black.withOpacity(0.9),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        "Exam Completed",
+                        style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("Return to Portal"),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatTime(int seconds) {
+    int minutes = seconds ~/ 60;
+    int remainingSeconds = seconds % 60;
+    return "${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}";
+  }
+}

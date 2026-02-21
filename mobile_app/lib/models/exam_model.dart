@@ -1,0 +1,30 @@
+import 'question_model.dart';
+
+class Exam {
+  final String id;
+  final String title;
+  final int duration;
+  final DateTime? startTime;
+  final DateTime? endTime;
+  final List<Question> questions;
+
+  Exam({
+    required this.id,
+    required this.title,
+    required this.duration,
+    this.startTime,
+    this.endTime,
+    this.questions = const [],
+  });
+
+  factory Exam.fromJson(Map<String, dynamic> json, {List<Question> questions = const []}) {
+    return Exam(
+      id: json['id'],
+      title: json['title'],
+      duration: json['duration'],
+      startTime: json['start_time'] != null ? DateTime.parse(json['start_time']) : null,
+      endTime: json['end_time'] != null ? DateTime.parse(json['end_time']) : null,
+      questions: questions,
+    );
+  }
+}
