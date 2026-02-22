@@ -15,8 +15,15 @@ const MonitoringPage = () => {
 
         const answersSub = supabase
             .channel('answers-live')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'answers' }, payload => {
-                setAnswers(prev => [payload.new, ...prev]);
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'answers' }, async payload => {
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('email, name')
+                    .eq('id', payload.new.student_id)
+                    .maybeSingle();
+
+                const newAnswerWithProfile = { ...payload.new, profiles: profile };
+                setAnswers(prev => [newAnswerWithProfile, ...prev]);
             })
             .subscribe();
 
@@ -36,7 +43,7 @@ const MonitoringPage = () => {
     const fetchHistory = async () => {
         const { data } = await supabase
             .from('answers')
-            .select('*')
+            .select('*, profiles(email, name)')
             .order('timestamp', { ascending: false })
             .limit(50);
         if (data) setAnswers(data);
@@ -128,35 +135,37 @@ const MonitoringPage = () => {
                                 {answers.map((answer, ix) => (
                                     <motion.tr
                                         key={answer.timestamp + ix}
-                                        initial={{ opacity: 0, x: -10 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.2s ease' }}
+                                        initial={{ opacity: 0, x: -10, background: '#f5f3ff' }}
+                                        animate={{ opacity: 1, x: 0, background: '#ffffff' }}
+                                        style={{ borderBottom: '2px solid #000000', transition: 'background 0.2s ease' }}
                                     >
-                                        <td style={{ padding: '20px 24px', fontSize: '13px', color: 'var(--text-muted)' }}>
+                                        <td style={{ padding: '20px 24px', fontSize: '13px', color: '#000000', fontWeight: '800' }}>
                                             {format(new Date(answer.timestamp), 'HH:mm:ss')}
                                         </td>
-                                        <td style={{ padding: '20px 24px', fontSize: '14px', fontWeight: '500', color: 'var(--accent-indigo)' }}>
-                                            {answer.student_id}
+                                        <td style={{ padding: '20px 24px', fontSize: '14px', fontWeight: '800', color: '#6366f1' }}>
+                                            {answer.profiles?.email || answer.student_id?.substring(0, 8) || 'ANONYMOUS'}
                                         </td>
                                         <td style={{ padding: '20px 24px', fontSize: '14px', maxWidth: '400px' }}>
-                                            <p style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
-                                                {answer.transcript}
+                                            <p style={{ fontWeight: '500', color: '#000000' }}>
+                                                "{answer.transcript}"
                                             </p>
                                         </td>
                                         <td style={{ padding: '20px 24px' }}>
                                             <span style={{
-                                                padding: '4px 10px',
+                                                padding: '6px 14px',
                                                 borderRadius: '0',
-                                                fontSize: '10px',
-                                                fontWeight: '900',
-                                                background: answer.is_correct ? '#000000' : '#ffffff',
-                                                color: answer.is_correct ? '#ffffff' : '#000000',
-                                                border: `1px solid #000000`
+                                                fontSize: '11px',
+                                                fontWeight: '950',
+                                                background: answer.is_correct ? '#6366f1' : '#000000',
+                                                color: '#ffffff',
+                                                border: `none`,
+                                                textTransform: 'uppercase',
+                                                letterSpacing: '1px'
                                             }}>
-                                                {answer.is_correct ? 'PASSED' : 'FAILED'}
+                                                {answer.is_correct ? 'GRADED: OK' : 'GRADED: ERR'}
                                             </span>
                                         </td>
-                                        <td style={{ padding: '20px 24px', fontWeight: '700', fontSize: '15px' }}>
+                                        <td style={{ padding: '20px 24px', fontWeight: '950', fontSize: '18px', color: '#000000' }}>
                                             {answer.score.toFixed(1)}
                                         </td>
                                     </motion.tr>

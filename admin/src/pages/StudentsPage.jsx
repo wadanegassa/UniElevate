@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
-import { UserPlus, UserCheck, Smartphone, Trash2, Search, Mail } from 'lucide-react';
+import { UserPlus, UserCheck, Smartphone, Trash2, Search, Mail, AlertCircle, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ConfirmModal from '../components/ConfirmModal';
 
 const StudentsPage = () => {
     const [students, setStudents] = useState([]);
@@ -10,11 +11,22 @@ const StudentsPage = () => {
     const [newStudent, setNewStudent] = useState({ name: '', email: '' });
     const [search, setSearch] = useState('');
 
+    // Modal state
+    const [modalConfig, setModalConfig] = useState({
+        open: false,
+        id: null,
+        title: '',
+        message: '',
+        type: 'danger',
+        onConfirm: () => { }
+    });
+
     useEffect(() => {
         fetchStudents();
     }, []);
 
     const fetchStudents = async () => {
+        setLoading(true);
         // Fetch registered students (pending login)
         const { data: registryData } = await supabase
             .from('student_registry')
@@ -53,15 +65,53 @@ const StudentsPage = () => {
         }
     };
 
-    const unbindDevice = async (id) => {
-        if (!confirm('Are you sure you want to unbind this device? The student will need to re-authenticate.')) return;
+    const confirmUnbind = (id, name) => {
+        setModalConfig({
+            open: true,
+            id,
+            title: 'Unbind Device?',
+            message: `Are you sure you want to unbind the device for ${name}? They will be logged out and required to re-authenticate on their next login.`,
+            type: 'danger',
+            onConfirm: () => unbindDevice(id)
+        });
+    };
 
+    const confirmDeleteStudent = (student) => {
+        setModalConfig({
+            open: true,
+            id: student.id,
+            title: 'Delete Student?',
+            message: `Are you sure you want to remove ${student.name} from the system? This will delete their profile and exam results permanently.`,
+            type: 'danger',
+            onConfirm: () => handleDeleteStudent(student)
+        });
+    };
+
+    const unbindDevice = async (id) => {
         const { error } = await supabase
             .from('profiles')
             .update({ device_id: null })
             .eq('id', id);
 
         if (!error) fetchStudents();
+        else alert(error.message);
+        setModalConfig(prev => ({ ...prev, open: false }));
+    };
+
+    const handleDeleteStudent = async (student) => {
+        try {
+            if (student.status === 'pending') {
+                // Delete from registry
+                await supabase.from('student_registry').delete().eq('email', student.email);
+            } else {
+                // Delete from profiles
+                await supabase.from('profiles').delete().eq('id', student.id);
+            }
+            fetchStudents();
+        } catch (err) {
+            alert(err.message);
+        }
+        setModalConfig(prev => ({ ...prev, open: false }));
     };
 
     const filtered = students.filter(s =>
@@ -98,96 +148,85 @@ const StudentsPage = () => {
                     {filtered.map(student => (
                         <motion.div
                             key={student.id}
-                            layout
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.9 }}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
                             style={{
                                 padding: '24px',
-                                border: '2px solid #000000',
                                 background: '#ffffff',
-                                boxShadow: '8px 8px 0px #000000'
+                                border: '2px solid #000000',
+                                boxShadow: student.status === 'active' ? '8px 8px 0px #000000' : 'none',
+                                position: 'relative',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '16px'
                             }}
                         >
-                            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '20px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                 <div style={{
-                                    width: '48px',
-                                    height: '48px',
-                                    borderRadius: '0',
-                                    background: '#000000',
+                                    width: '40px',
+                                    height: '40px',
+                                    background: student.status === 'active' ? '#e1f5fe' : '#f5f5f5',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    fontSize: '20px',
-                                    fontWeight: '900',
-                                    color: '#ffffff'
+                                    borderRadius: '0',
+                                    border: '2px solid #000000'
                                 }}>
-                                    {student.name[0]}
+                                    {student.status === 'active' ? <UserCheck size={20} color="#000000" /> : <Mail size={20} color="#000000" />}
                                 </div>
-                                {student.status === 'pending' ? (
-                                    <div style={{
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <span style={{
+                                        fontSize: '10px',
+                                        fontWeight: '900',
                                         padding: '4px 8px',
-                                        borderRadius: '0',
-                                        background: '#f0f0f0',
-                                        color: '#000000',
-                                        fontSize: '10px',
-                                        fontWeight: '900',
-                                        border: '1px solid #000000'
-                                    }}>PENDING LOGIN</div>
-                                ) : student.device_id ? (
-                                    <div style={{
-                                        padding: '6px 12px',
-                                        borderRadius: '0',
-                                        fontSize: '10px',
-                                        fontWeight: '900',
-                                        letterSpacing: '0.5px',
-                                        background: '#000000',
-                                        color: '#ffffff',
-                                        border: '1px solid #000000',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '6px'
+                                        background: student.status === 'active' ? '#000000' : '#e5e7eb',
+                                        color: student.status === 'active' ? '#ffffff' : '#4b5563',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.5px'
                                     }}>
-                                        <Smartphone size={10} /> DEVICE BOUND
-                                    </div>
-                                ) : (
-                                    <div style={{
-                                        padding: '6px 12px',
-                                        borderRadius: '0',
-                                        fontSize: '10px',
-                                        fontWeight: '900',
-                                        letterSpacing: '0.5px',
-                                        background: '#ffffff',
-                                        color: '#000000',
-                                        border: '2px dashed #000000',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '6px'
-                                    }}>
-                                        <Smartphone size={10} style={{ opacity: 0.5 }} /> READY TO BIND
-                                    </div>
-                                )}
-                            </div>
-
-                            <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '4px' }}>{student.name}</h3>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '14px', marginBottom: '24px' }}>
-                                <Mail size={14} /> {student.email}
-                            </div>
-
-                            <div style={{ display: 'flex', gap: '12px' }}>
-                                {student.device_id && (
+                                        {student.status}
+                                    </span>
                                     <button
-                                        className="btn-outline"
-                                        onClick={() => unbindDevice(student.id)}
-                                        style={{ flex: 1, borderRadius: '0', border: '2px solid #000000', color: '#ff4444', fontWeight: '900', fontSize: '11px' }}
+                                        onClick={() => confirmDeleteStudent(student)}
+                                        style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '4px' }}
                                     >
-                                        UNBIND DEVICE
+                                        <Trash2 size={16} />
                                     </button>
-                                )}
-                                <button className="btn-outline" style={{ minWidth: '42px', padding: '0', borderRadius: '0', border: '2px solid #000000' }}>
-                                    <Trash2 size={16} />
-                                </button>
+                                </div>
                             </div>
+
+                            <div>
+                                <h3 style={{ fontSize: '18px', fontWeight: '800', marginBottom: '4px' }}>{student.name}</h3>
+                                <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>{student.email}</p>
+                            </div>
+
+                            {student.status === 'active' && (
+                                <div style={{
+                                    marginTop: 'auto',
+                                    padding: '12px',
+                                    background: '#f9fafb',
+                                    borderLeft: '4px solid #000000',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between'
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                                        <Smartphone size={14} />
+                                        <span style={{ fontWeight: '600' }}>
+                                            {student.device_id ? `Bound: ${student.device_id.substring(0, 8)}...` : 'No device bound'}
+                                        </span>
+                                    </div>
+                                    {student.device_id && (
+                                        <button
+                                            onClick={() => confirmUnbind(student.id, student.name)}
+                                            style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '11px', fontWeight: '800' }}
+                                        >
+                                            UNBIND
+                                        </button>
+                                    )}
+                                </div>
+                            )}
                         </motion.div>
                     ))}
                 </AnimatePresence>
@@ -196,59 +235,52 @@ const StudentsPage = () => {
             {/* Add Student Modal */}
             <AnimatePresence>
                 {showAdd && (
-                    <div style={{
-                        position: 'fixed', inset: 0, zIndex: 100,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)'
-                    }}>
+                    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
                         <motion.div
-                            initial={{ opacity: 0, y: 50 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 50 }}
-                            style={{
-                                width: '100%',
-                                maxWidth: '480px',
-                                padding: '40px',
-                                background: '#ffffff',
-                                border: '4px solid #000000',
-                                boxShadow: '16px 16px 0px #000000'
-                            }}
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            style={{ background: '#ffffff', padding: '40px', width: '100%', maxWidth: '400px', border: '4px solid #000000', boxShadow: '20px 20px 0px #000000' }}
                         >
-                            <h2 style={{ fontSize: '24px', fontWeight: '800', marginBottom: '8px' }}>Register Student</h2>
-                            <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>Initialize a new student profile in the system</p>
-
+                            <h2 style={{ fontSize: '24px', fontWeight: '900', marginBottom: '24px' }}>Register Student</h2>
                             <form onSubmit={handleAddStudent}>
                                 <div style={{ marginBottom: '20px' }}>
-                                    <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>FULL NAME</label>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '8px' }}>FULL NAME</label>
                                     <input
                                         className="input-field"
-                                        placeholder="Enter student name"
                                         value={newStudent.name}
                                         onChange={e => setNewStudent({ ...newStudent, name: e.target.value })}
                                         required
                                     />
                                 </div>
-                                <div style={{ marginBottom: '40px' }}>
-                                    <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>EMAIL ADDRESS</label>
+                                <div style={{ marginBottom: '32px' }}>
+                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '8px' }}>EMAIL ADDRESS</label>
                                     <input
                                         type="email"
                                         className="input-field"
-                                        placeholder="student@haramaya.com"
                                         value={newStudent.email}
                                         onChange={e => setNewStudent({ ...newStudent, email: e.target.value })}
                                         required
                                     />
                                 </div>
-
-                                <div style={{ display: 'flex', gap: '16px' }}>
-                                    <button type="button" className="btn-outline" onClick={() => setShowAdd(false)} style={{ flex: 1, borderRadius: '0', border: '2px solid #000000', fontWeight: '900' }}>CANCEL</button>
-                                    <button type="submit" className="btn-primary" style={{ flex: 1, borderRadius: '0', background: '#000000', color: '#ffffff', fontWeight: '900', border: 'none' }}>CREATE PROFILE</button>
+                                <div style={{ display: 'flex', gap: '12px' }}>
+                                    <button type="button" onClick={() => setShowAdd(false)} style={{ flex: 1, padding: '12px', background: 'transparent', border: '2px solid #e5e7eb', fontWeight: '800' }}>CANCEL</button>
+                                    <button type="submit" style={{ flex: 1, padding: '12px', background: '#000000', color: '#ffffff', fontWeight: '900', border: 'none' }}>REGISTER</button>
                                 </div>
                             </form>
                         </motion.div>
                     </div>
                 )}
             </AnimatePresence>
+
+            <ConfirmModal
+                isOpen={modalConfig.open}
+                onClose={() => setModalConfig({ ...modalConfig, open: false })}
+                onConfirm={modalConfig.onConfirm}
+                title={modalConfig.title}
+                message={modalConfig.message}
+                type={modalConfig.type}
+            />
         </div>
     );
 };

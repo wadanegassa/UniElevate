@@ -22,12 +22,12 @@ const DashboardLayout = () => {
     const [latestExam, setLatestExam] = useState(null);
 
     useEffect(() => {
-        fetchLatestExam();
+        fetchActiveExam();
 
         const subscription = supabase
             .channel('exams-live')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'exams' }, payload => {
-                fetchLatestExam();
+                fetchActiveExam();
             })
             .subscribe();
 
@@ -36,15 +36,30 @@ const DashboardLayout = () => {
         };
     }, []);
 
-    const fetchLatestExam = async () => {
-        const { data } = await supabase
-            .from('exams')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
+    const fetchActiveExam = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('exams')
+                .select('*')
+                .eq('is_active', true)
+                .maybeSingle();
 
-        if (data) setLatestExam(data);
+            if (error) {
+                console.error('Error fetching active exam:', error);
+                setLatestExam(null);
+                return;
+            }
+
+            // Explicitly set to null if no active exam is found
+            if (!data) {
+                setLatestExam(null);
+            } else {
+                setLatestExam(data);
+            }
+        } catch (err) {
+            console.error('Unexpected error in fetchActiveExam:', err);
+            setLatestExam(null);
+        }
     };
 
     const menuItems = [
@@ -73,23 +88,24 @@ const DashboardLayout = () => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: '12px',
-                    padding: '0 12px 40px',
+                    padding: '0 12px 48px',
                     overflow: 'hidden'
                 }}>
                     <div style={{
                         minWidth: '40px',
                         height: '40px',
-                        background: 'var(--accent-indigo)',
-                        borderRadius: '10px',
+                        background: '#000000',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center'
+                        justifyContent: 'center',
+                        border: '2px solid #000000',
+                        boxShadow: '4px 4px 0px #6366f1'
                     }}>
                         <Activity color="white" size={24} />
                     </div>
                     {sidebarOpen && (
-                        <span style={{ fontSize: '18px', fontWeight: '900', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                            UniElevate <span style={{ color: '#00d2ff' }}>PRO</span>
+                        <span style={{ fontSize: '18px', fontWeight: '950', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '1.5px', color: '#000000' }}>
+                            UNIELEVATE <span style={{ color: '#6366f1' }}>PRO</span>
                         </span>
                     )}
                 </div>
@@ -104,19 +120,22 @@ const DashboardLayout = () => {
                                 style={{
                                     display: 'flex',
                                     alignItems: 'center',
-                                    padding: '12px 16px',
-                                    marginBottom: '8px',
-                                    borderRadius: '12px',
-                                    color: isActive ? 'white' : 'var(--text-secondary)',
+                                    padding: '14px 16px',
+                                    marginBottom: '12px',
+                                    color: isActive ? 'white' : '#000000',
                                     background: isActive ? '#000000' : 'transparent',
                                     textDecoration: 'none',
-                                    transition: 'all 0.2s ease',
-                                    border: isActive ? '1px solid #000000' : '1px solid transparent'
+                                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    border: isActive ? '2px solid #000000' : '2px solid transparent',
+                                    fontWeight: '900',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px',
+                                    fontSize: '12px'
                                 }}
                             >
-                                <item.icon size={20} style={{ minWidth: '20px', color: isActive ? 'white' : 'inherit' }} />
+                                <item.icon size={18} style={{ minWidth: '18px', color: isActive ? 'white' : '#000000' }} />
                                 {sidebarOpen && (
-                                    <span style={{ marginLeft: '12px', fontSize: '14px', fontWeight: isActive ? '600' : '400' }}>
+                                    <span style={{ marginLeft: '16px' }}>
                                         {item.name}
                                     </span>
                                 )}
@@ -124,20 +143,51 @@ const DashboardLayout = () => {
                         );
                     })}
                     {sidebarOpen && (
-                        <div style={{
-                            marginTop: '20px',
-                            padding: '16px',
-                            background: 'rgba(99, 102, 241, 0.05)',
-                            borderRadius: '12px',
-                            border: '1px dashed rgba(99, 102, 241, 0.2)'
-                        }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: 'var(--text-muted)', fontSize: '11px', fontWeight: '800' }}>
-                                <Lock size={12} /> ACTIVE COMMAND
+                        <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            style={{
+                                marginTop: '40px',
+                                padding: '24px',
+                                background: latestExam ? '#6366f1' : '#1f2937',
+                                color: '#ffffff',
+                                border: '3px solid #000000',
+                                boxShadow: '8px 8px 0px #000000',
+                                position: 'relative',
+                                overflow: 'hidden',
+                                transition: 'background 0.3s ease'
+                            }}
+                        >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                <label style={{ fontSize: '10px', fontWeight: '950', color: 'rgba(255,255,255,0.7)', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                                    {latestExam ? 'LIVE PROCTOR ACCESS' : 'SYSTEM OFFLINE'}
+                                </label>
+                                {latestExam && (
+                                    <motion.div
+                                        animate={{ opacity: [1, 0.4, 1] }}
+                                        transition={{ repeat: Infinity, duration: 1.5 }}
+                                        style={{ width: '8px', height: '8px', background: '#4ade80', borderRadius: '50%' }}
+                                    />
+                                )}
                             </div>
-                            <div style={{ fontSize: '16px', fontWeight: '800', color: 'var(--accent-indigo)', letterSpacing: '1px' }}>
+
+                            <div style={{ marginBottom: '4px', fontSize: '11px', fontWeight: '800', opacity: 0.9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {latestExam?.title || 'No Exam Active'}
+                            </div>
+
+                            <div style={{ fontSize: '24px', fontWeight: '950', letterSpacing: '2px', fontFamily: 'monospace', textShadow: '2px 2px 0px rgba(0,0,0,0.2)' }}>
                                 {latestExam?.access_code || '---'}
                             </div>
-                        </div>
+
+                            <div style={{
+                                position: 'absolute',
+                                right: '-10px',
+                                bottom: '-10px',
+                                opacity: 0.1
+                            }}>
+                                <Lock size={64} />
+                            </div>
+                        </motion.div>
                     )}
                 </nav>
 

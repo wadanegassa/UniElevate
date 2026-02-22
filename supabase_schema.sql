@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS exams (
     start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     end_time TIMESTAMP WITH TIME ZONE,
     access_code TEXT,
+    is_active BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -85,12 +86,42 @@ ALTER TABLE questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE answers ENABLE ROW LEVEL SECURITY;
 
 -- 9. RLS Policies
--- Note: Simplified for hackathon; in production, use auth.uid() checks more strictly.
-CREATE POLICY "Allow public read for exams" ON exams FOR SELECT USING (true);
-CREATE POLICY "Allow public read for questions" ON questions FOR SELECT USING (true);
+-- Profiles: Allow public read of email/role for pre-login registration check
+DROP POLICY IF EXISTS "Allow public read for profiles" ON profiles;
+CREATE POLICY "Allow public read for profiles" ON profiles FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Profiles are viewable by owners" ON profiles;
 CREATE POLICY "Profiles are viewable by owners" ON profiles FOR SELECT USING (auth.uid() = id);
+DROP POLICY IF EXISTS "Users can insert their own profile" ON profiles;
 CREATE POLICY "Users can insert their own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
+DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
 CREATE POLICY "Users can update their own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
+DROP POLICY IF EXISTS "Allow admin all for profiles" ON profiles;
+CREATE POLICY "Allow admin all for profiles" ON profiles FOR ALL USING (true);
+
+-- Exams & Questions: Public read, Admin write
+DROP POLICY IF EXISTS "Allow public read for exams" ON exams;
+CREATE POLICY "Allow public read for exams" ON exams FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow admin all for exams" ON exams;
+CREATE POLICY "Allow admin all for exams" ON exams FOR ALL USING (true); -- Simplified for hackathon admin context
+
+DROP POLICY IF EXISTS "Allow public read for questions" ON questions;
+CREATE POLICY "Allow public read for questions" ON questions FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow admin all for questions" ON questions;
+CREATE POLICY "Allow admin all for questions" ON questions FOR ALL USING (true);
+
+-- Answers: Admin all, Public read
+ALTER TABLE answers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow admin all for answers" ON answers;
+CREATE POLICY "Allow admin all for answers" ON answers FOR ALL USING (true);
+DROP POLICY IF EXISTS "Allow public read for answers" ON answers;
+CREATE POLICY "Allow public read for answers" ON answers FOR SELECT USING (true);
+
+-- student_registry: Public read, Admin write
+ALTER TABLE student_registry ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read for student_registry" ON student_registry;
+CREATE POLICY "Allow public read for student_registry" ON student_registry FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow admin all for student_registry" ON student_registry;
+CREATE POLICY "Allow admin all for student_registry" ON student_registry FOR ALL USING (true);
 
 -- 10. Enable Realtime Safely
 -- This block ensures each table is added to the publication only once.
@@ -117,6 +148,7 @@ END $$;
 
 -- 11. Profile Automation Trigger
 -- This ensures every new Auth user gets a profile automatically
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 DECLARE
@@ -144,12 +176,28 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Only create if it doesn't exist
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- 12. MIGRATIONS & UPDATES (Idempotent Fixes for existing DBs)
+-- Ensure 'is_active' exists
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE;
+
+-- Ensure 'answers' has CASCADE delete
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'on_auth_user_created') THEN
-        CREATE TRIGGER on_auth_user_created
-          AFTER INSERT ON auth.users
-          FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+    -- Fix student_id constraint
+    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'answers_student_id_fkey') THEN
+        ALTER TABLE answers DROP CONSTRAINT answers_student_id_fkey;
     END IF;
+    ALTER TABLE answers ADD CONSTRAINT answers_student_id_fkey 
+    FOREIGN KEY (student_id) REFERENCES profiles(id) ON DELETE CASCADE;
+
+    -- Fix question_id constraint
+    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'answers_question_id_fkey') THEN
+        ALTER TABLE answers DROP CONSTRAINT answers_question_id_fkey;
+    END IF;
+    ALTER TABLE answers ADD CONSTRAINT answers_question_id_fkey 
+    FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE;
 END $$;
