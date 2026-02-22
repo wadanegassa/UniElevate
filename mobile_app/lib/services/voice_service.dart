@@ -97,7 +97,7 @@ class VoiceService {
   String _lastWords = "";
 
   Future<void> listen({
-    required Function(String) onResult,
+    required Function(String, double) onResult,
     required Function(bool) onListeningChanged,
     VoidCallback? onError,
   }) async {
@@ -136,6 +136,7 @@ class VoiceService {
 
     // 4. Reset state
     _lastWords = "";
+    bool resultEmitted = false;
     
     // 5. SMARTER SEQUENCING: Mandatory Guard Delay
     // Increas to 1 second to ensure complete silence on all hardware
@@ -148,8 +149,14 @@ class VoiceService {
       await _stt.listen(
         onResult: (result) {
           _lastWords = result.recognizedWords;
-          if (result.finalResult || result.confidence > 0.8) {
-            onResult(result.recognizedWords);
+          
+          // Emit result only once if confidence is high or it's final
+          if (!resultEmitted && (result.finalResult || result.confidence > 0.85)) {
+            resultEmitted = true;
+            onResult(result.recognizedWords, result.confidence);
+            if (result.finalResult) {
+              _stt.stop();
+            }
           }
         },
         listenFor: const Duration(seconds: 30),
@@ -158,7 +165,7 @@ class VoiceService {
           listenMode: ListenMode.dictation,
           cancelOnError: true,
           partialResults: true,
-          onDevice: false, // Set to false to prevent error_language_unavailable if model is missing
+          onDevice: false,
         ),
       );
     } catch (e) {
