@@ -44,6 +44,7 @@ dependencies:
   connectivity_plus: ^6.1.1
   google_generative_ai: ^0.4.6
   device_info_plus: ^11.2.1
+  audio_session: ^0.1.21
 
 dev_dependencies:
   flutter_test:

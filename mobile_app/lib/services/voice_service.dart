@@ -2,15 +2,36 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:audio_session/audio_session.dart';
 
 class VoiceService {
   final FlutterTts _tts = FlutterTts();
   final SpeechToText _stt = SpeechToText();
   bool _isTtsInitialized = false;
+  bool _isSpeaking = false;
 
   Future<void> init() async {
+    await _initAudioSession();
     await _initTts();
     await _initStt();
+  }
+
+  Future<void> _initAudioSession() async {
+    final session = await AudioSession.instance;
+    await session.configure(AudioSessionConfiguration(
+      avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+      avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.allowBluetooth,
+      avAudioSessionMode: AVAudioSessionMode.spokenAudio,
+      avAudioSessionRouteSharingPolicy: AVAudioSessionRouteSharingPolicy.defaultPolicy,
+      avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+      androidAudioAttributes: const AndroidAudioAttributes(
+        contentType: AndroidAudioContentType.speech,
+        flags: AndroidAudioFlags.none,
+        usage: AndroidAudioUsage.voiceCommunication,
+      ),
+      androidAudioFocusGainType: AndroidAudioFocusGainType.gainTransientMayDuck,
+    ));
+    debugPrint('VoiceService: AudioSession configured for Voice Communication');
   }
 
   Future<void> _initTts() async {
@@ -19,6 +40,21 @@ class VoiceService {
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
     _isTtsInitialized = true;
+
+    _tts.setStartHandler(() {
+      _isSpeaking = true;
+      debugPrint('VoiceService: TTS Started speaking');
+    });
+
+    _tts.setCompletionHandler(() {
+      _isSpeaking = false;
+      debugPrint('VoiceService: TTS Finished speaking');
+    });
+
+    _tts.setErrorHandler((msg) {
+      _isSpeaking = false;
+      debugPrint('VoiceService: TTS Error: $msg');
+    });
   }
 
   Future<void> _initStt() async {
@@ -34,18 +70,28 @@ class VoiceService {
   Future<void> speak(String text, {VoidCallback? onComplete}) async {
     if (!_isTtsInitialized) await _initTts();
     
-    if (onComplete != null) {
-      _tts.setCompletionHandler(() {
-        onComplete();
-      });
-    }
-    
-    await _tts.speak(text);
+    // Stop any existing session
+    await stopSpeaking();
+    await stopListening();
+
+    // Instead of manual splitting (which causes stuttering/interruptions),
+    // we use a single speak command but replace "..." with punctuation 
+    // that naturally results in pauses in most TTS engines.
+    final processedText = text.replaceAll("...", "... ");
+
+    _tts.setCompletionHandler(() {
+      _isSpeaking = false;
+      if (onComplete != null) onComplete();
+    });
+
+    _isSpeaking = true;
+    await _tts.speak(processedText);
   }
 
   Future<void> stopSpeaking() async {
-    _tts.setCompletionHandler(() {}); // Clear handler
+    _tts.setCompletionHandler(() {}); 
     await _tts.stop();
+    _isSpeaking = false;
   }
 
   String _lastWords = "";
@@ -55,6 +101,12 @@ class VoiceService {
     required Function(bool) onListeningChanged,
     VoidCallback? onError,
   }) async {
+    // 0. Safety Check: If we are still speaking, wait or abort
+    if (_isSpeaking) {
+      debugPrint('VoiceService: Aborting listen - TTS is active');
+      return;
+    }
+
     // 1. Ensure microphone permission
     var status = await Permission.microphone.status;
     if (!status.isGranted) {
@@ -66,54 +118,48 @@ class VoiceService {
       }
     }
 
-    // 2. Stop if already listening (toggle behavior)
+    // 2. Stop if already listening
     if (_stt.isListening) {
       await _stt.stop();
       onListeningChanged(false);
       return;
     }
 
-    // 3. Ensure STT is initialized and available
+    // 3. Ensure STT is initialized
     if (!_stt.isAvailable) {
-      debugPrint('VoiceService: STT not available, initializing...');
-      bool initialized = await _stt.initialize(
-        onError: (error) => debugPrint('VoiceService: STT Init Error: $error'),
-        onStatus: (status) => debugPrint('VoiceService: STT Init Status: $status'),
-      );
-      if (!initialized) {
-        debugPrint('VoiceService: Failed to initialize STT');
+      await _initStt();
+      if (!_stt.isAvailable) {
         if (onError != null) onError();
         return;
       }
     }
 
-    // 4. Reset state for new session
+    // 4. Reset state
     _lastWords = "";
-    onListeningChanged(true);
     
-    // 5. Small delay to ensure any previous audio (like TTS) has fully stopped 
-    // and the mic is ready to capture clearly.
-    await Future.delayed(const Duration(milliseconds: 500));
+    // 5. SMARTER SEQUENCING: Mandatory Guard Delay
+    // Increas to 1 second to ensure complete silence on all hardware
+    await Future.delayed(const Duration(milliseconds: 1000));
 
-    debugPrint('VoiceService: Starting listening session...');
-    
+    debugPrint('VoiceService: Starting listening session (Earphone/Bluetooth ready)...');
+    onListeningChanged(true);
+
     try {
       await _stt.listen(
         onResult: (result) {
-          debugPrint('VoiceService: Result: "${result.recognizedWords}" (final: ${result.finalResult})');
           _lastWords = result.recognizedWords;
-          
-          if (result.finalResult) {
+          if (result.finalResult || result.confidence > 0.8) {
             onResult(result.recognizedWords);
-            onListeningChanged(false);
           }
         },
         listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 5), // Increased for slower speakers
-        listenMode: ListenMode.dictation, // Use dictation for better continuous capture
-        onSoundLevelChange: null,
-        cancelOnError: true,
-        partialResults: true,
+        pauseFor: const Duration(seconds: 4),
+        listenOptions: SpeechListenOptions(
+          listenMode: ListenMode.dictation,
+          cancelOnError: true,
+          partialResults: true,
+          onDevice: false, // Set to false to prevent error_language_unavailable if model is missing
+        ),
       );
     } catch (e) {
       debugPrint('VoiceService: Listen error: $e');
@@ -121,19 +167,10 @@ class VoiceService {
       if (onError != null) onError();
     }
 
-    // Hook into status to handle the "done" state if no final results were caught
     _stt.statusListener = (status) {
-      debugPrint('VoiceService: Status changed to $status');
       if (status == 'notListening' || status == 'done') {
         onListeningChanged(false);
-        if (_lastWords.isEmpty && status == 'done') {
-          debugPrint('VoiceService: Ended with no words recognized');
-          if (onError != null) onError();
-        } else if (_lastWords.isNotEmpty) {
-          // Backup: if we have words but no "final" result was emitted
-          onResult(_lastWords);
-          _lastWords = "";
-        }
+        debugPrint('VoiceService: STT status finished: $status. Last words: $_lastWords');
       }
     };
   }
@@ -143,4 +180,5 @@ class VoiceService {
   }
 
   bool get isListening => _stt.isListening;
+  bool get isSpeaking => _isSpeaking;
 }
