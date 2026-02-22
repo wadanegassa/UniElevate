@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
-import { ChevronDown, ChevronUp, User, BookOpen } from 'lucide-react';
+import { ChevronDown, ChevronUp, User, BookOpen, Activity } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 
 const MonitoringPage = () => {
     const [answers, setAnswers] = useState([]);

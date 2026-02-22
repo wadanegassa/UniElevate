@@ -1,5 +1,6 @@
 class Answer {
   final String studentId;
+  final String examId;
   final String questionId;
   final String transcript;
   final bool isCorrect;
@@ -9,6 +10,7 @@ class Answer {
 
   Answer({
     required this.studentId,
+    required this.examId,
     required this.questionId,
     required this.transcript,
     required this.isCorrect,
@@ -20,6 +22,7 @@ class Answer {
   Map<String, dynamic> toJson() {
     return {
       'student_id': studentId,
+      'exam_id': examId,
       'question_id': questionId,
       'transcript': transcript,
       'is_correct': isCorrect,

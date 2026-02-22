@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../models/question_model.dart';
@@ -19,17 +20,35 @@ class GradingService {
   }
 
   GradingResult _gradeMCQ(Question question, String transcript) {
-    bool isCorrect = transcript.toLowerCase().trim() == question.correctAnswer?.toLowerCase().trim();
+    // Normalize both the transcript and the correct answer for comparison
+    // transcript might be "Option A" or just "A"
+    String normalizedTranscript = transcript.toUpperCase().replaceAll("OPTION", "").replaceAll(RegExp(r'[^\w]'), "").trim();
+    String normalizedCorrect = (question.correctAnswer ?? "").toUpperCase().replaceAll("OPTION", "").replaceAll(RegExp(r'[^\w]'), "").trim();
+    
+    // Check if the answer matches either the letter or the full option text
+    bool isCorrect = normalizedTranscript == normalizedCorrect;
+    
+    if (!isCorrect && question.options != null && normalizedTranscript.length == 1) {
+       // If student said "A", and correctAnswer is "A", isCorrect is true.
+       // But if student said "A" and correctAnswer is the full text of option A, 
+       // we should also count it as correct.
+       int index = normalizedTranscript.codeUnitAt(0) - 65;
+       if (index >= 0 && index < question.options!.length) {
+         String optionText = question.options![index].toUpperCase().trim();
+         if (optionText == normalizedCorrect) isCorrect = true;
+       }
+    }
+    
     return GradingResult(
       isCorrect: isCorrect,
       score: isCorrect ? 1.0 : 0.0,
-      feedback: "I've recorded your answer.",
+      feedback: "Answer recorded. Moving to the next question.",
     );
   }
 
   Future<GradingResult> _gradeTheory(Question question, String transcript) async {
     final prompt = """
-    You are an expert examiner for blind students. Evaluate the following spoken answer.
+    You are an expert examiner for blind students. Evaluate the following spoken answer for semantic correctness.
     
     Question: ${question.text}
     Required Keywords/Concepts: ${question.keywords?.join(', ')}
@@ -37,16 +56,16 @@ class GradingService {
     Student's Spoken Transcript: "$transcript"
     
     Instructions:
-    1. Ignore speech artifacts like "umm", "err", "i think", "maybe", or repetitions.
-    2. Handle homophones gracefully (e.g., "cell" vs "sell", "weather" vs "whether") as this is a voice-to-text transcript.
-    3. Focus on the semantic meaning. Does the student demonstrate understanding of the core concepts?
-    4. Even if the grammar is poor (due to STT errors), if the keywords or their synonyms are present and correctly related, it is correct.
+    1. EXTREME LENIENCY: This is a speech-to-text transcript. Ignore phonetic errors, missing punctuation, "umm/err" fillers, and repetitions.
+    2. SEMANTIC FOCUS: If the student mentions the core concepts or their synonyms correctly, mark it as correct.
+    3. HOMOPHONES: Correct for homophones (e.g., "cell" vs "sell").
+    4. PARTIAL CREDIT: If they get some parts right, give a score between 0.1 and 0.9.
     
     Response Format (STRICT JSON):
     {
       "is_correct": boolean,
       "score": number (0.0 to 1.0),
-      "feedback": "Concise, encouraging audio-friendly feedback that does NOT reveal if the answer was correct or incorrect. Just acknowledge receipt."
+      "feedback": "A very short, neutral response like 'Recorded' or 'Got it'. DO NOT indicate if the answer was right or wrong, and DO NOT reveal the correct answer."
     }
     """;
 
@@ -59,27 +78,20 @@ class GradingService {
       final jsonMatch = RegExp(r'\{.*\}', dotAll: true).firstMatch(text);
       if (jsonMatch != null) {
         final jsonStr = jsonMatch.group(0)!;
-        // Simple manual parsing to avoid adding json dependency if not needed
-        // but let's assume we can use basic string checks for this hackathon
-        bool isCorrect = jsonStr.contains('"is_correct": true');
-        double score = 0.0;
-        if (jsonStr.contains('"score": 1')) {
-          score = 1.0;
-        } else if (jsonStr.contains('"score": 0')) {
-          score = 0.5; // Partial credit
-        }
-        
-        String feedback = "I've recorded your answer.";
-        final feedbackMatch = RegExp(r'"feedback":\s*"(.*?)"').firstMatch(jsonStr);
-        if (feedbackMatch != null) {
-          feedback = feedbackMatch.group(1)!;
-        }
+        try {
+          final decoded = json.decode(jsonStr) as Map<String, dynamic>;
+          final isCorrect = decoded['is_correct'] == true;
+          final score = (decoded['score'] as num?)?.toDouble() ?? (isCorrect ? 1.0 : 0.0);
+          final feedback = decoded['feedback']?.toString() ?? "Answer recorded.";
 
-        return GradingResult(
-          isCorrect: isCorrect,
-          score: score,
-          feedback: feedback,
-        );
+          return GradingResult(
+            isCorrect: isCorrect,
+            score: score,
+            feedback: feedback,
+          );
+        } catch (e) {
+          debugPrint('JSON parse error: $e');
+        }
       }
       
       // Fallback to keyword matching if AI output is messy
@@ -87,14 +99,14 @@ class GradingService {
       return GradingResult(
         isCorrect: containsKeywords,
         score: containsKeywords ? 0.8 : 0.0,
-        feedback: "I've recorded your answer. Well done.",
+        feedback: "Answer recorded. Let's move to the next one.",
       );
     } catch (e) {
       debugPrint('Error grading answer: $e');
       return GradingResult(
         isCorrect: false,
         score: 0.0,
-        feedback: "I've noted your answer. Let's move to the next one.",
+        feedback: "Answer recorded. Moving forward.",
       );
     }
   }

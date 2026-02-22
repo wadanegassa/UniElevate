@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:vibration/vibration.dart';
 import '../models/exam_model.dart';
 import '../models/question_model.dart';
@@ -145,11 +147,12 @@ class ExamProvider with ChangeNotifier {
         if (!isListening && _auraState == AuraState.studentSpeaking) _setAuraState(AuraState.idle);
       },
       onError: () {
-        debugPrint('ExamProvider: Readiness check failed or timed out.');
-        _voiceService.speak(
-          "I didn't hear you. Please say yes when you are ready to begin.",
-          onComplete: () => _listenForReadiness(),
-        );
+        debugPrint('ExamProvider: Readiness check failed or timed out. Auto-restarting.');
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!_isTransitioning && _currentSessionType == ExamSession.readiness) {
+            _listenForReadiness();
+          }
+        });
       },
     );
   }
@@ -238,15 +241,21 @@ class ExamProvider with ChangeNotifier {
         }
 
         String displayAnswer = transcript;
+        
+        // CRITICAL FIX: Ensure single letters are ALWAYS converted to "Option X"
+        // This guarantees _processAnswer and grading logic works correctly.
         if (command.length == 1 && RegExp(r'^[A-E]$').hasMatch(command)) {
           displayAnswer = "Option $command";
+        } else if (currentQuestion?.type == QuestionType.mcq && RegExp(r'^[a-eA-E]$').hasMatch(transcript.replaceAll(RegExp(r'[^\w\s]'), '').trim())) {
+           displayAnswer = "Option ${transcript.replaceAll(RegExp(r'[^\w\s]'), '').trim().toUpperCase()}";
         }
 
         _liveTranscript = displayAnswer;
         notifyListeners();
 
-        // SMART CONFIRMATION: Skip confirmation if confidence is very high
-        if (confidence > 0.95 && currentQuestion?.type == QuestionType.mcq && displayAnswer.startsWith("Option")) {
+        // SMART CONFIRMATION: Skip confirmation if confidence is VERY high
+        // and it's a clean MCQ selection
+        if (confidence > 0.98 && currentQuestion?.type == QuestionType.mcq && displayAnswer.startsWith("Option ")) {
           debugPrint('ExamProvider: High confidence ($confidence), skipping confirmation.');
           _processAnswer(displayAnswer);
         } else {
@@ -257,8 +266,13 @@ class ExamProvider with ChangeNotifier {
         if (!isListening && _auraState == AuraState.studentSpeaking) _setAuraState(AuraState.idle);
       },
       onError: () {
-        debugPrint('ExamProvider: Question answer failed or timed out.');
-        _voiceService.speak("I didn't hear your answer. Please say it again.", onComplete: () => _listenForQuestionAnswer());
+        debugPrint('ExamProvider: Question answer failed or timed out. Auto-restarting listen.');
+        // Don't speak an error, just silently restart listening to give the student more time
+        Future.delayed(const Duration(milliseconds: 500), () {
+           if (!_isTransitioning && _currentSessionType == ExamSession.question) {
+               _listenForQuestionAnswer();
+           }
+        });
       },
     );
   }
@@ -286,13 +300,17 @@ class ExamProvider with ChangeNotifier {
           _processAnswer(originalTranscript);
         } else {
           // Check if they provided a new answer in the "no" response
-          // e.g., "No, I meant Option B" or "No, it is Berlin"
+          // e.g., "No, I meant Option B" or "No, it is Berlin" or just "B"
           String? correctedAnswer;
           if (currentQuestion?.type == QuestionType.mcq && currentQuestion?.options != null) {
             final matchedLetter = VoiceUtils.matchOption(transcript, currentQuestion!.options!);
             if (matchedLetter != null) {
                correctedAnswer = "Option $matchedLetter";
             }
+          }
+          
+          if (correctedAnswer == null && transcript.trim().length == 1 && RegExp(r'^[a-eA-E]$').hasMatch(transcript.trim())) {
+             correctedAnswer = "Option ${transcript.trim().toUpperCase()}";
           }
           
           if (correctedAnswer != null) {
@@ -311,8 +329,12 @@ class ExamProvider with ChangeNotifier {
         if (!isListening && _auraState == AuraState.studentSpeaking) _setAuraState(AuraState.idle);
       },
       onError: () {
-        debugPrint('ExamProvider: Confirmation listening failed or timed out.');
-        _voiceService.speak("Was that a yes or a no?", onComplete: () => _listenForConfirmation(originalTranscript));
+        debugPrint('ExamProvider: Confirmation listening failed or timed out. Auto-restarting.');
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!_isTransitioning && _currentSessionType == ExamSession.confirmation) {
+            _listenForConfirmation(originalTranscript);
+          }
+        });
       },
     );
   }
@@ -321,15 +343,20 @@ class ExamProvider with ChangeNotifier {
     if (_isTransitioning) return;
     _isTransitioning = true;
     _setAuraState(AuraState.processing);
-    final result = await _gradingService.gradeAnswer(currentQuestion!, transcript);
+    
+    String finalAnswer = transcript;
+    
+    // Clean theory answers before sending to grading
+    if (currentQuestion?.type == QuestionType.theory) {
+      finalAnswer = VoiceUtils.cleanTheoryAnswer(transcript);
+    }
+    
+    final result = await _gradingService.gradeAnswer(currentQuestion!, finalAnswer);
     
     // Provide feedback
     _setAuraState(AuraState.aiSpeaking);
-    if (result.isCorrect) {
-      Vibration.vibrate(duration: 500);
-    } else {
-      Vibration.vibrate(pattern: [0, 200, 100, 200]);
-    }
+    // Unified neutral vibration for privacy
+    Vibration.vibrate(duration: 300);
     
     await _voiceService.speak(result.feedback, onComplete: () {
       _isTransitioning = false;
@@ -339,6 +366,7 @@ class ExamProvider with ChangeNotifier {
     // Save answer
     final answer = Answer(
       studentId: _studentId ?? "anonymous",
+      examId: currentExam!.id,
       questionId: currentQuestion!.id,
       transcript: transcript,
       isCorrect: result.isCorrect,
@@ -364,14 +392,16 @@ class ExamProvider with ChangeNotifier {
     _examTimer?.cancel();
     _isFinished = true;
     _setAuraState(AuraState.aiSpeaking);
-    await _voiceService.speak("Congratulations! You have completed the exam. Well done for your hard work.");
+    await _voiceService.speak("You are finished your exam. The application will now close.");
     _setAuraState(AuraState.idle);
     notifyListeners();
     
-    // Auto-logout after a short delay to allow the voice to finish
+    // Auto-close the app after a short delay
     await Future.delayed(const Duration(seconds: 2));
-    if (_onLogout != null) {
-      _onLogout!();
+    if (kIsWeb) {
+      if (_onLogout != null) _onLogout!();
+    } else {
+      SystemNavigator.pop();
     }
   }
 

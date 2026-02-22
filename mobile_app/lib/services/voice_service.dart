@@ -74,12 +74,22 @@ class VoiceService {
     }
   }
 
+  int _activeSpeakSessionId = 0;
+  bool _isProcessingSpeakRequest = false;
+
   Future<void> speak(String text, {VoidCallback? onComplete}) async {
     if (!_isTtsInitialized) await _initTts();
     
-    debugPrint('VoiceService: speak() called with: "$text"');
+    // Prevent overlapping speak requests from trampling each other's setup
+    while (_isProcessingSpeakRequest) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    _isProcessingSpeakRequest = true;
+
+    final sessionId = ++_activeSpeakSessionId;
+    debugPrint('VoiceService: speak() called for session #$sessionId with: "$text"');
     
-    // Stop any existing session
+    // Aggressively stop any existing session before starting a new one
     await stopSpeaking();
     await stopListening();
 
@@ -89,24 +99,29 @@ class VoiceService {
     Timer? safetyTimer;
     
     void handleComplete() {
+      if (sessionId != _activeSpeakSessionId) return; // Ignore old callbacks
+      
       safetyTimer?.cancel();
       if (_isSpeaking) {
         _isSpeaking = false;
-        debugPrint('VoiceService: speak() completed');
+        debugPrint('VoiceService: speak() completed for session #$sessionId');
         if (onComplete != null) onComplete();
       }
     }
 
     _tts.setCompletionHandler(handleComplete);
 
-    // Guard: most sentences should finish in < 20s
-    safetyTimer = Timer(const Duration(seconds: 20), () async {
-      debugPrint('VoiceService: speak() safety timeout triggered. Force stopping TTS.');
+    // Guard: most sentences should finish in < 60s, but scale with text length just in case
+    final timeoutSeconds = 15 + (processedText.length ~/ 10);
+    safetyTimer = Timer(Duration(seconds: timeoutSeconds > 60 ? timeoutSeconds : 60), () async {
+      if (sessionId != _activeSpeakSessionId) return;
+      debugPrint('VoiceService: speak() safety timeout triggered for session #$sessionId. Force stopping TTS.');
       await _tts.stop(); // Force native stop
       handleComplete();
     });
 
     _isSpeaking = true;
+    _isProcessingSpeakRequest = false;
     await _tts.speak(processedText);
   }
 
@@ -114,7 +129,10 @@ class VoiceService {
     _tts.setCompletionHandler(() {}); 
     await _tts.stop();
     _isSpeaking = false;
-    debugPrint('VoiceService: stopSpeaking() called');
+    // VERY IMPORTANT: Do NOT await a delay here.
+    // Delaying inside stopSpeaking causes the caller to wait, and if they start a new
+    // session immediately after, the old delay might resolve and interfere. 
+    debugPrint('VoiceService: stopSpeaking() called natively.');
   }
 
   String _lastWords = "";
@@ -176,7 +194,9 @@ class VoiceService {
     bool resultEmitted = false;
     final sessionStartTime = DateTime.now();
     
-    // Mandatory Guard Delay
+    // Mandatory Guard Delay - Reverted to 1000ms. 
+    // 400ms is too fast; the mic opens while the OS is still flushing the TTS audio buffer,
+    // causing immediate error_speech_timeout or error_no_match.
     await Future.delayed(const Duration(milliseconds: 1000));
 
     // Ensure we are still the active session after the delay

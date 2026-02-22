@@ -20,6 +20,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   final VoiceService _voiceService = VoiceService();
   AuraState _auraState = AuraState.idle;
 
+  bool _isWelcomeActive = true;
+
   @override
   void initState() {
     super.initState();
@@ -32,7 +34,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   }
 
   Future<void> _welcomeVoice() async {
-    if (!mounted) return;
+    if (!mounted || !_isWelcomeActive) return;
     
     // 1. Initial Greeting
     setState(() => _auraState = AuraState.aiSpeaking);
@@ -41,23 +43,30 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     );
 
     // 2. Breathing Sequence
-    if (!mounted) return;
+    if (!mounted || !_isWelcomeActive) return;
     setState(() => _auraState = AuraState.zenBreathing);
-    await Future.delayed(const Duration(seconds: 4)); // 4 seconds for the breath
+    
+    // Break delay into smaller chunks to allow faster cancellation
+    for (int i = 0; i < 40; i++) {
+      if (!mounted || !_isWelcomeActive) return;
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
 
     // 3. Instructions
-    if (!mounted) return;
+    if (!mounted || !_isWelcomeActive) return;
     setState(() => _auraState = AuraState.aiSpeaking);
     await _voiceService.speak(
       "I am your digital proctor. Please enter your email and access command to enter the exam portal, or tap the screen for voice assistance.",
       onComplete: () {
-        if (!mounted) return;
+        if (!mounted || !_isWelcomeActive) return;
         setState(() => _auraState = AuraState.idle);
       },
     );
   }
 
   Future<void> _startVoiceLogin() async {
+    _isWelcomeActive = false; // Abort any outgoing welcome sequence
+    
     if (!mounted) return;
     setState(() {
       _auraState = AuraState.aiSpeaking;

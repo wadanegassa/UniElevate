@@ -16,23 +16,35 @@ class VoiceUtils {
       lower = lower.replaceAll(RegExp('\\b$word\\b'), digit);
     });
 
+    // Strip punctuation BEFORE phonetic letter matching to handle "hay." or "hey,"
+    lower = lower.replaceAll(RegExp(r'[^\w\s]'), ''); 
+    
     // 0.5. Phonetic Letter repair (A-E)
     // Helps STT engines that misinterpret single letter options
     final letterMap = {
-      'hey': 'a', 'eh': 'a', 'aye': 'a', 'eight': 'a',
-      'be': 'b', 'bee': 'b', 'me': 'b', 'v': 'b',
-      'see': 'c', 'sea': 'c', 'si': 'c', 'say': 'c',
-      'the': 'd', 'dee': 'd', 'di': 'd', 'day': 'd',
-      'ee': 'e', 'he': 'e'
+      'hey': 'a', 'eh': 'a', 'aye': 'a', 'ay': 'a', 'ei': 'a', 'eight': 'a', 'ey': 'a', 'hay': 'a',
+      'bee': 'b', 'be': 'b', 'pea': 'b', 'p': 'b', 'me': 'b', 'dissent': 'b', 'bit': 'b',
+      'see': 'c', 'sea': 'c', 'si': 'c', 'say': 'c', 'she': 'c', 'xi': 'c',
+      'dee': 'd', 'de': 'd', 'tea': 'd', 't': 'd', 'the': 'd', 'di': 'd', 'do': 'd',
+      'ee': 'e', 'e': 'e', 'he': 'e', 'hi': 'e', 'ii': 'e', 'eat': 'e', 'each': 'e'
     };
     letterMap.forEach((word, letter) {
-      if (lower.trim() == word) lower = letter; // Direct match
+      if (lower.trim() == word) lower = letter; // Direct match for single word
       lower = lower.replaceAll(RegExp('\\boption $word\\b'), 'option $letter');
       lower = lower.replaceAll(RegExp('\\bchoice $word\\b'), 'choice $letter');
+      lower = lower.replaceAll(RegExp('\\banswer $word\\b'), 'answer $letter');
+      lower = lower.replaceAll(RegExp('\\bis $word\\b'), 'is $letter');
+      lower = lower.replaceAll(RegExp('\\bit is $word\\b'), 'it is $letter');
     });
 
     // 1. Check for MCQ options first (A, B, C, D, E)
-    final mcqMatch = RegExp(r'\b(option|choice|answer is|it is|pick|select|letter)?\s*([a-e])\b').firstMatch(lower);
+    // We already stripped punctuation above, so lower should be clean
+    String cleanLetter = lower.trim();
+    if (cleanLetter.length == 1 && RegExp(r'[a-e]').hasMatch(cleanLetter)) {
+      return cleanLetter.toUpperCase();
+    }
+
+    final mcqMatch = RegExp(r'\b(option|choice|answer is|it is|it’s|pick|select|letter|my answer is|i think it is|go with|mark)\s*([a-e])\b').firstMatch(lower);
     if (mcqMatch != null) {
       final letter = mcqMatch.group(2)!.toUpperCase();
       debugPrint('VoiceUtils: Detected MCQ Option $letter');
@@ -66,6 +78,25 @@ class VoiceUtils {
     
     // Otherwise, return cleaned uppercase for raw command matching (useful for login passwords)
     return lower.toUpperCase().replaceAll(RegExp(r'\s+'), '_');
+  }
+
+  static String cleanTheoryAnswer(String text) {
+    if (text.isEmpty) return "";
+    String lower = text.toLowerCase().trim();
+    
+    // Remove common speech fillers
+    final fillers = [
+      "ummm", "uhhh", "hmmm", "well", "like", "you know", "i mean", 
+      "actually", "basically", "so yeah", "i think that", "maybe it is",
+      "let me see", "i guess"
+    ];
+    
+    String cleaned = lower;
+    for (var filler in fillers) {
+       cleaned = cleaned.replaceAll(RegExp('\\b$filler\\b'), '');
+    }
+    
+    return cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   static String normalizeEmail(String text) {
@@ -105,22 +136,66 @@ class VoiceUtils {
     String lowerTranscript = transcript.toLowerCase().trim();
     if (lowerTranscript.isEmpty) return null;
     
+    final letterMap = {
+      'hey': 'a', 'eh': 'a', 'aye': 'a', 'ay': 'a', 'ei': 'a', 'eight': 'a', 'ey': 'a', 'hay': 'a',
+      'bee': 'b', 'be': 'b', 'pea': 'b', 'p': 'b', 'me': 'b', 'dissent': 'b', 'bit': 'b',
+      'see': 'c', 'sea': 'c', 'si': 'c', 'say': 'c', 'she': 'c', 'xi': 'c',
+      'dee': 'd', 'de': 'd', 'tea': 'd', 't': 'd', 'the': 'd', 'di': 'd', 'do': 'd',
+      'ee': 'e', 'e': 'e', 'he': 'e', 'hi': 'e', 'ii': 'e', 'eat': 'e', 'each': 'e'
+    };
+    
+    // Direct phonetic replacement for the entire transcript
+    if (letterMap.containsKey(lowerTranscript)) {
+       lowerTranscript = letterMap[lowerTranscript]!;
+    }
+    
     // First run it through normalizeCommand to see if it cleanly outputs a letter a-E
     final normalized = normalizeCommand(lowerTranscript);
     if (normalized.length == 1 && RegExp(r'[A-E]').hasMatch(normalized)) {
       int idx = normalized.codeUnitAt(0) - 65;
       if (idx < options.length) return normalized;
     }
+    
+    // Fallback: strip punctuation and check again
+    String stripped = lowerTranscript.replaceAll(RegExp(r'[^\w\s]'), '').trim();
+    if (stripped.length == 1 && RegExp(r'[a-eA-E]').hasMatch(stripped)) {
+       String letter = stripped.toUpperCase();
+       int idx = letter.codeUnitAt(0) - 65;
+       if (idx < options.length) return letter;
+    }
+    
+    // Check if transcript starts with a letter like "a is the answer"
+    final startMatch = RegExp(r'^([a-eA-E])\b').firstMatch(stripped);
+    if (startMatch != null) {
+       String letter = startMatch.group(1)!.toUpperCase();
+       int idx = letter.codeUnitAt(0) - 65;
+       if (idx < options.length) return letter;
+    }
+
+    // 0.5 Number to Letter matching ("1", "2", "3")
+    // Helps when students say "Option 1" or just "1"
+    final numericMatch = RegExp(r'\b([1-5])\b').firstMatch(lowerTranscript);
+    if (numericMatch != null) {
+        int index = int.parse(numericMatch.group(1)!) - 1;
+        if (index < options.length) {
+            return String.fromCharCode(65 + index);
+        }
+    }
 
     // 1. Ordinal matching ("first", "second", "third", "last")
-    final ordinals = ["first", "second", "third", "fourth", "fifth", "last"];
-    for (int i = 0; i < ordinals.length; i++) {
-        final ord = ordinals[i];
-        if (lowerTranscript.contains(ord)) {
-            int index = i;
-            if (ord == "last") index = options.length - 1;
-            if (index < options.length) {
-                return String.fromCharCode(65 + index);
+    final ordinals = {
+      "first": 0, "1st": 0,
+      "second": 1, "2nd": 1,
+      "third": 2, "3rd": 2,
+      "fourth": 3, "4th": 3,
+      "fifth": 4, "5th": 4,
+      "last": options.length - 1
+    };
+    
+    for (final entry in ordinals.entries) {
+        if (lowerTranscript.contains(RegExp('\\b${entry.key}\\b'))) {
+            if (entry.value < options.length) {
+                return String.fromCharCode(65 + entry.value);
             }
         }
     }

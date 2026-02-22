@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 -- 7. Create Answers table
 CREATE TABLE IF NOT EXISTS answers (
     student_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+    exam_id UUID REFERENCES exams(id) ON DELETE CASCADE,
     question_id UUID REFERENCES questions(id) ON DELETE CASCADE,
     transcript TEXT NOT NULL,
     is_correct BOOLEAN DEFAULT FALSE,
