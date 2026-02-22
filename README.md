@@ -15,8 +15,12 @@ A hands-free, voice-driven exam experience for students.
 |---|---|
 | 🎙️ **Voice-First Login** | AI-guided login via speech. Email and access command spoken aloud. |
 | 🌀 **Aura Orb** | Central visual feedback orb reacting to AI speech, listening state, and processing. |
+| 🛡️ **Robust STT Parsing** | Intelligent phonetic matching automatically sanitizes confusing Speech-to-Text artifacts (e.g., mapping spoken "hey" to "A"). |
+| 🔄 **Silent Auto-Recovery** | The app invisibly restarts listening sessions if it encounters timeouts, ensuring students aren't distracted by technical errors. |
 | 🧠 **AI Grading** | Instant semantic grading of theory answers via Google Gemini Flash 1.5. |
+| 🔇 **Anonymized Feedback** | The system provides strictly neutral haptic and audio feedback during the exam to prevent students from learning correct answers mid-test. |
 | 🔒 **Device Binding** | Each student's exam seat is bound to a single physical device. |
+| 🚪 **Auto-Closure** | The app gracefully announces completion and natively closes itself when the exam concludes. |
 | 📡 **Supabase Backend** | Real-time synchronization of answers, scores, and exam events. |
 
 ### 2. Admin Proctor Portal (`/admin`) — React + Vite
