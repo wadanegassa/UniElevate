@@ -237,15 +237,20 @@ class ExamProvider with ChangeNotifier {
           }
         }
 
-        _liveTranscript = transcript;
+        String displayAnswer = transcript;
+        if (command.length == 1 && RegExp(r'^[A-E]$').hasMatch(command)) {
+          displayAnswer = "Option $command";
+        }
+
+        _liveTranscript = displayAnswer;
         notifyListeners();
 
         // SMART CONFIRMATION: Skip confirmation if confidence is very high
-        if (confidence > 0.95) {
+        if (confidence > 0.95 && currentQuestion?.type == QuestionType.mcq && displayAnswer.startsWith("Option")) {
           debugPrint('ExamProvider: High confidence ($confidence), skipping confirmation.');
-          _processAnswer(command.length == 1 ? command : transcript);
+          _processAnswer(displayAnswer);
         } else {
-          _confirmAnswer(command.length == 1 ? command : transcript);
+          _confirmAnswer(displayAnswer);
         }
       },
       onListeningChanged: (isListening) {
@@ -260,12 +265,9 @@ class ExamProvider with ChangeNotifier {
 
   Future<void> _confirmAnswer(String displayTranscript) async {
     _setAuraState(AuraState.aiSpeaking);
-    final prompt = currentQuestion!.type == QuestionType.mcq && displayTranscript.length == 1
-        ? "I heard option $displayTranscript. Is this correct?"
-        : "I heard: $displayTranscript. Is this correct?";
-        
+    // displayTranscript is already formatted like "Option A"
     await _voiceService.speak(
-      "$prompt Please say yes to confirm or no to try again.",
+      "I heard: $displayTranscript. Is this correct? Please say yes to confirm or no to try again.",
       onComplete: () => _listenForConfirmation(displayTranscript),
     );
   }
@@ -287,14 +289,21 @@ class ExamProvider with ChangeNotifier {
           // e.g., "No, I meant Option B" or "No, it is Berlin"
           String? correctedAnswer;
           if (currentQuestion?.type == QuestionType.mcq && currentQuestion?.options != null) {
-            correctedAnswer = VoiceUtils.matchOption(transcript, currentQuestion!.options!);
+            final matchedLetter = VoiceUtils.matchOption(transcript, currentQuestion!.options!);
+            if (matchedLetter != null) {
+               correctedAnswer = "Option $matchedLetter";
+            }
           }
           
           if (correctedAnswer != null) {
             debugPrint('ExamProvider: Detected self-correction: $correctedAnswer');
             _confirmAnswer(correctedAnswer);
           } else {
-            _voiceService.speak("Okay, please tell me your answer again.", onComplete: () => startListening());
+            _liveTranscript = "";
+            notifyListeners();
+            _voiceService.speak("Okay, please tell me your answer again.", onComplete: () {
+               if (!_isTransitioning) _listenForQuestionAnswer();
+            });
           }
         }
       },

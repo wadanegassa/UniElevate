@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
-import { format } from 'date-fns';
-import { Wifi, Activity, Terminal } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronDown, ChevronUp, User, BookOpen } from 'lucide-react';
 
 const MonitoringPage = () => {
     const [answers, setAnswers] = useState([]);
     const [exams, setExams] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [selectedExamId, setSelectedExamId] = useState(null);
+    const [expandedStudentId, setExpandedStudentId] = useState(null);
 
     useEffect(() => {
         fetchHistory();
@@ -53,11 +53,36 @@ const MonitoringPage = () => {
         const { data } = await supabase
             .from('exams')
             .select('*')
-            .order('created_at', { ascending: false })
-            .limit(5);
-        if (data) setExams(data);
+            .order('created_at', { ascending: false });
+
+        if (data) {
+            setExams(data);
+            if (data.length > 0 && !selectedExamId) {
+                setSelectedExamId(data[0].id);
+            }
+        }
         setLoading(false);
     };
+
+    // Group answers by Exam and then by Student
+    const answersByExam = answers.reduce((acc, ans) => {
+        if (!acc[ans.exam_id]) acc[ans.exam_id] = {};
+        if (!acc[ans.exam_id][ans.student_id]) {
+            acc[ans.exam_id][ans.student_id] = {
+                profile: ans.profiles,
+                totalScore: 0,
+                responses: []
+            };
+        }
+        acc[ans.exam_id][ans.student_id].responses.push(ans);
+        acc[ans.exam_id][ans.student_id].totalScore += ans.score;
+        return acc;
+    }, {});
+
+    const activeExam = exams.find(e => e.id === selectedExamId);
+    const activeStudents = selectedExamId && answersByExam[selectedExamId]
+        ? Object.entries(answersByExam[selectedExamId])
+        : [];
 
     return (
         <div className="page-fade-in">
@@ -81,109 +106,163 @@ const MonitoringPage = () => {
                 </div>
             </header>
 
-            <section style={{ marginBottom: '40px' }}>
-                <h2 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Wifi size={18} color="var(--accent-indigo)" /> Recently Deployed Exams
+            {/* Exam Selector */}
+            <section style={{ marginBottom: '32px' }}>
+                <h2 style={{ fontSize: '14px', fontWeight: '900', marginBottom: '16px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    Active Exams
                 </h2>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
+                <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '16px' }}>
                     {exams.map(ex => (
-                        <div key={ex.id} style={{
-                            padding: '24px',
-                            border: '2px solid #000000',
-                            background: '#ffffff',
-                            boxShadow: '8px 8px 0px #000000'
-                        }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-                                <span style={{ fontSize: '10px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                                    {ex.created_at ? format(new Date(ex.created_at), 'MMM d, HH:mm') : '---'}
-                                </span>
-                                <div style={{ background: '#000000', color: '#ffffff', padding: '4px 8px', borderRadius: '0', fontSize: '11px', fontWeight: '900' }}>
-                                    {ex.access_code}
-                                </div>
+                        <button
+                            key={ex.id}
+                            onClick={() => setSelectedExamId(ex.id)}
+                            style={{
+                                padding: '16px 24px',
+                                border: '2px solid #000000',
+                                background: selectedExamId === ex.id ? '#000000' : '#ffffff',
+                                color: selectedExamId === ex.id ? '#ffffff' : '#000000',
+                                boxShadow: selectedExamId === ex.id ? '4px 4px 0px var(--accent-indigo)' : '4px 4px 0px #000000',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                minWidth: '250px',
+                                transition: 'all 0.2s ease',
+                                transform: selectedExamId === ex.id ? 'translateY(2px)' : 'none'
+                            }}
+                        >
+                            <div style={{ fontSize: '10px', fontWeight: '900', color: selectedExamId === ex.id ? '#a5b4fc' : 'var(--text-muted)', marginBottom: '4px' }}>
+                                {ex.access_code}
                             </div>
-                            <h3 style={{ fontSize: '18px', fontWeight: '800', marginBottom: '4px', textTransform: 'uppercase' }}>{ex.title}</h3>
-                            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '600' }}>{ex.duration} Minutes • ACTIVE</p>
-                        </div>
+                            <h3 style={{ fontSize: '16px', fontWeight: '800', textTransform: 'uppercase' }}>{ex.title}</h3>
+                        </button>
                     ))}
-                    {exams.length === 0 && (
-                        <div className="glass-panel" style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)', gridColumn: '1 / -1' }}>
-                            No exams deployed yet.
-                        </div>
+                    {exams.length === 0 && !loading && (
+                        <p style={{ color: 'var(--text-muted)' }}>No exams deployed.</p>
                     )}
                 </div>
             </section>
 
-            <div style={{ border: '2px solid #000000', background: '#ffffff' }}>
-                <div style={{ padding: '24px', borderBottom: '2px solid #000000', display: 'flex', alignItems: 'center', gap: '12px', background: '#f8f8f8' }}>
-                    <Terminal size={18} color="#000000" />
-                    <span style={{ fontSize: '14px', fontWeight: '900', color: '#000000', textTransform: 'uppercase', letterSpacing: '1px' }}>Activity Stream</span>
-                </div>
+            {/* Student Dashboard for Selected Exam */}
+            {activeExam && (
+                <div style={{ border: '2px solid #000000', background: '#ffffff', boxShadow: '8px 8px 0px #000000' }}>
+                    <div style={{ padding: '24px', borderBottom: '2px solid #000000', background: '#f8f8f8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <BookOpen size={20} />
+                            <h2 style={{ fontSize: '18px', fontWeight: '900', textTransform: 'uppercase' }}>Student Progress: {activeExam.title}</h2>
+                        </div>
+                        <span style={{ fontSize: '12px', fontWeight: '800', background: '#000000', color: '#ffffff', padding: '4px 12px' }}>
+                            {activeStudents.length} Students Active
+                        </span>
+                    </div>
 
-                <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                        <thead>
-                            <tr style={{ borderBottom: '2px solid #000000', background: '#ffffff' }}>
-                                <th style={{ padding: '16px 24px', fontSize: '11px', color: '#000000', fontWeight: '900', textTransform: 'uppercase' }}>TIMESTAMP</th>
-                                <th style={{ padding: '16px 24px', fontSize: '11px', color: '#000000', fontWeight: '900', textTransform: 'uppercase' }}>STUDENT</th>
-                                <th style={{ padding: '16px 24px', fontSize: '11px', color: '#000000', fontWeight: '900', textTransform: 'uppercase' }}>TRANSCRIPT</th>
-                                <th style={{ padding: '16px 24px', fontSize: '11px', color: '#000000', fontWeight: '900', textTransform: 'uppercase' }}>GRADE</th>
-                                <th style={{ padding: '16px 24px', fontSize: '11px', color: '#000000', fontWeight: '900', textTransform: 'uppercase' }}>SCORE</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <AnimatePresence initial={false}>
-                                {answers.map((answer, ix) => (
-                                    <motion.tr
-                                        key={answer.timestamp + ix}
-                                        initial={{ opacity: 0, x: -10, background: '#f5f3ff' }}
-                                        animate={{ opacity: 1, x: 0, background: '#ffffff' }}
-                                        style={{ borderBottom: '2px solid #000000', transition: 'background 0.2s ease' }}
-                                    >
-                                        <td style={{ padding: '20px 24px', fontSize: '13px', color: '#000000', fontWeight: '800' }}>
-                                            {format(new Date(answer.timestamp), 'HH:mm:ss')}
-                                        </td>
-                                        <td style={{ padding: '20px 24px', fontSize: '14px', fontWeight: '800', color: '#6366f1' }}>
-                                            {answer.profiles?.email || answer.student_id?.substring(0, 8) || 'ANONYMOUS'}
-                                        </td>
-                                        <td style={{ padding: '20px 24px', fontSize: '14px', maxWidth: '400px' }}>
-                                            <p style={{ fontWeight: '500', color: '#000000' }}>
-                                                "{answer.transcript}"
-                                            </p>
-                                        </td>
-                                        <td style={{ padding: '20px 24px' }}>
-                                            <span style={{
-                                                padding: '6px 14px',
-                                                borderRadius: '0',
-                                                fontSize: '11px',
-                                                fontWeight: '950',
-                                                background: answer.is_correct ? '#6366f1' : '#000000',
-                                                color: '#ffffff',
-                                                border: `none`,
-                                                textTransform: 'uppercase',
-                                                letterSpacing: '1px'
-                                            }}>
-                                                {answer.is_correct ? 'GRADED: OK' : 'GRADED: ERR'}
-                                            </span>
-                                        </td>
-                                        <td style={{ padding: '20px 24px', fontWeight: '950', fontSize: '18px', color: '#000000' }}>
-                                            {answer.score.toFixed(1)}
-                                        </td>
-                                    </motion.tr>
-                                ))}
-                            </AnimatePresence>
+                    <div>
+                        {activeStudents.length === 0 ? (
+                            <div style={{ padding: '64px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                <Activity size={48} style={{ opacity: 0.1, margin: '0 auto 16px' }} />
+                                <p style={{ fontWeight: '600' }}>Waiting for student submissions on this exam...</p>
+                            </div>
+                        ) : (
+                            activeStudents.map(([studentId, data], ix) => {
+                                const isExpanded = expandedStudentId === studentId;
+                                const email = data.profile?.email || studentId.substring(0, 8);
 
-                            {!loading && answers.length === 0 && (
-                                <tr>
-                                    <td colSpan="5" style={{ padding: '80px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
-                                        <Activity size={48} style={{ opacity: 0.1, marginBottom: '16px' }} />
-                                        <p>Waiting for live student responses...</p>
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
+                                return (
+                                    <div key={studentId} style={{ borderBottom: ix < activeStudents.length - 1 ? '1px solid #e5e7eb' : 'none' }}>
+                                        {/* Student Row */}
+                                        <button
+                                            onClick={() => setExpandedStudentId(isExpanded ? null : studentId)}
+                                            style={{
+                                                width: '100%',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'space-between',
+                                                padding: '20px 24px',
+                                                background: isExpanded ? '#f5f3ff' : 'transparent',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                textAlign: 'left',
+                                                transition: 'background 0.2s ease'
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                                <div style={{ width: '40px', height: '40px', background: '#000000', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '14px' }}>
+                                                    {email.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div>
+                                                    <h4 style={{ fontSize: '16px', fontWeight: '800', color: '#000000' }}>{email}</h4>
+                                                    <p style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-secondary)' }}>{data.responses.length} / {activeExam.questions?.length || '?'} Questions Answered</p>
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+                                                <div style={{ textAlign: 'right' }}>
+                                                    <p style={{ fontSize: '10px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Current Score</p>
+                                                    <p style={{ fontSize: '20px', fontWeight: '900', color: '#6366f1' }}>{data.totalScore.toFixed(1)}</p>
+                                                </div>
+                                                {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                                            </div>
+                                        </button>
+
+                                        {/* Expanded Answer Breakdown */}
+                                        <AnimatePresence>
+                                            {isExpanded && (
+                                                <motion.div
+                                                    initial={{ height: 0, opacity: 0 }}
+                                                    animate={{ height: 'auto', opacity: 1 }}
+                                                    exit={{ height: 0, opacity: 0 }}
+                                                    style={{ overflow: 'hidden', background: '#fafafa', borderTop: '2px solid #000000' }}
+                                                >
+                                                    <div style={{ padding: '24px' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                                            <thead>
+                                                                <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                                                                    <th style={{ padding: '0 16px 16px 0', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'left', width: '40%' }}>Question (Original Text)</th>
+                                                                    <th style={{ padding: '0 16px 16px', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'left', width: '30%' }}>Student Transcript</th>
+                                                                    <th style={{ padding: '0 16px 16px', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'center' }}>Grade</th>
+                                                                    <th style={{ padding: '0 0 16px 16px', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'right' }}>Points</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {data.responses.sort((a, b) => a.question_index - b.question_index).map((ans, ix) => {
+                                                                    const qText = activeExam.questions?.[ans.question_index]?.text || `Question ${ans.question_index + 1}`;
+                                                                    return (
+                                                                        <tr key={ans.id} style={{ borderBottom: ix < data.responses.length - 1 ? '1px solid #e5e7eb' : 'none' }}>
+                                                                            <td style={{ padding: '16px 16px 16px 0', verticalAlign: 'top' }}>
+                                                                                <span style={{ fontSize: '11px', fontWeight: '900', color: '#6366f1', display: 'block', marginBottom: '4px' }}>Q{ans.question_index + 1}</span>
+                                                                                <p style={{ fontSize: '13px', fontWeight: '600', color: '#374151', lineHeight: '1.4' }}>{qText}</p>
+                                                                            </td>
+                                                                            <td style={{ padding: '16px', verticalAlign: 'top' }}>
+                                                                                <p style={{ fontSize: '14px', fontWeight: '500', color: '#000000', fontStyle: 'italic' }}>"{ans.transcript}"</p>
+                                                                            </td>
+                                                                            <td style={{ padding: '16px', verticalAlign: 'top', textAlign: 'center' }}>
+                                                                                <span style={{
+                                                                                    padding: '4px 8px',
+                                                                                    fontSize: '10px',
+                                                                                    fontWeight: '900',
+                                                                                    background: ans.is_correct ? '#10b981' : '#ef4444',
+                                                                                    color: '#ffffff',
+                                                                                    textTransform: 'uppercase'
+                                                                                }}>
+                                                                                    {ans.is_correct ? 'Correct' : 'Incorrect'}
+                                                                                </span>
+                                                                            </td>
+                                                                            <td style={{ padding: '16px 0 16px 16px', verticalAlign: 'top', textAlign: 'right', fontWeight: '900', fontSize: '16px' }}>
+                                                                                {ans.score.toFixed(1)}
+                                                                            </td>
+                                                                        </tr>
+                                                                    );
+                                                                })}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
 
             <style>{`
         @keyframes pulse {

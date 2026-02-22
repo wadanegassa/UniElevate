@@ -16,8 +16,23 @@ class VoiceUtils {
       lower = lower.replaceAll(RegExp('\\b$word\\b'), digit);
     });
 
+    // 0.5. Phonetic Letter repair (A-E)
+    // Helps STT engines that misinterpret single letter options
+    final letterMap = {
+      'hey': 'a', 'eh': 'a', 'aye': 'a', 'eight': 'a',
+      'be': 'b', 'bee': 'b', 'me': 'b', 'v': 'b',
+      'see': 'c', 'sea': 'c', 'si': 'c', 'say': 'c',
+      'the': 'd', 'dee': 'd', 'di': 'd', 'day': 'd',
+      'ee': 'e', 'he': 'e'
+    };
+    letterMap.forEach((word, letter) {
+      if (lower.trim() == word) lower = letter; // Direct match
+      lower = lower.replaceAll(RegExp('\\boption $word\\b'), 'option $letter');
+      lower = lower.replaceAll(RegExp('\\bchoice $word\\b'), 'choice $letter');
+    });
+
     // 1. Check for MCQ options first (A, B, C, D, E)
-    final mcqMatch = RegExp(r'\b(option|choice|answer is|it is|pick|select)?\s*([a-e])\b').firstMatch(lower);
+    final mcqMatch = RegExp(r'\b(option|choice|answer is|it is|pick|select|letter)?\s*([a-e])\b').firstMatch(lower);
     if (mcqMatch != null) {
       final letter = mcqMatch.group(2)!.toUpperCase();
       debugPrint('VoiceUtils: Detected MCQ Option $letter');
@@ -87,9 +102,16 @@ class VoiceUtils {
   }
 
   static String? matchOption(String transcript, List<String> options) {
-    final lowerTranscript = transcript.toLowerCase().trim();
+    String lowerTranscript = transcript.toLowerCase().trim();
     if (lowerTranscript.isEmpty) return null;
     
+    // First run it through normalizeCommand to see if it cleanly outputs a letter a-E
+    final normalized = normalizeCommand(lowerTranscript);
+    if (normalized.length == 1 && RegExp(r'[A-E]').hasMatch(normalized)) {
+      int idx = normalized.codeUnitAt(0) - 65;
+      if (idx < options.length) return normalized;
+    }
+
     // 1. Ordinal matching ("first", "second", "third", "last")
     final ordinals = ["first", "second", "third", "fourth", "fifth", "last"];
     for (int i = 0; i < ordinals.length; i++) {
