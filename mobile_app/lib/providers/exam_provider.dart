@@ -23,6 +23,8 @@ class ExamProvider with ChangeNotifier {
   AuraState _auraState = AuraState.idle;
   String _liveTranscript = "";
   bool _isFinished = false;
+  bool _isTransitioning = false;
+  ExamSession _currentSessionType = ExamSession.none;
   String? _studentId;
   VoidCallback? _onLogout;
 
@@ -76,10 +78,14 @@ class ExamProvider with ChangeNotifier {
   }
 
   Future<void> _welcome() async {
+    debugPrint('ExamProvider: _welcome() called');
     _setAuraState(AuraState.aiSpeaking);
     await _voiceService.speak(
       "Welcome to the Uni Elevate Digital Exam Portal. You are now taking ${_currentExam!.title}. Are you ready to begin?",
-      onComplete: () => _listenForReadiness(),
+      onComplete: () {
+        debugPrint('ExamProvider: Welcome TTS complete, calling _listenForReadiness()');
+        _listenForReadiness();
+      },
     );
   }
 
@@ -100,18 +106,39 @@ class ExamProvider with ChangeNotifier {
   }
 
   Future<void> _listenForReadiness() async {
-    if (_voiceService.isSpeaking) return;
+    debugPrint('ExamProvider: _listenForReadiness() called');
+    if (_voiceService.isSpeaking || _isTransitioning) return;
+    
+    _currentSessionType = ExamSession.readiness;
     _setAuraState(AuraState.studentSpeaking);
     await _voiceService.listen(
-      onResult: (transcript, confidence) {
+      onResult: (transcript, confidence) async {
+        if (_isTransitioning || _currentSessionType != ExamSession.readiness) return;
+        
+        debugPrint('ExamProvider: Readiness result: "$transcript" (conf: $confidence)');
         final command = _normalizeCommand(transcript);
         if (_handleGlobalCommands(command)) return;
 
         if (command == "yes") {
+          debugPrint('ExamProvider: Readiness confirmed, transitioning to _readQuestion()');
+          _isTransitioning = true;
+          _setAuraState(AuraState.idle);
+          await _voiceService.stopListening();
+          await Future.delayed(const Duration(milliseconds: 1500)); // Increased settle delay
+          _isTransitioning = false;
           _readQuestion();
+        } else if (command == "no") {
+          debugPrint('ExamProvider: Readiness declined');
+          await _voiceService.speak(
+            "No problem. I'll wait. Just say yes whenever you are ready to begin.",
+            onComplete: () => _listenForReadiness(),
+          );
         } else {
-          debugPrint('ExamProvider: Transcript did not match "yes": $transcript (conf: $confidence)');
-          _voiceService.speak("I didn't quite catch that. Please say yes when you are ready to begin.", onComplete: () => _listenForReadiness());
+          debugPrint('ExamProvider: Unrecognized readiness command: "$command"');
+          _voiceService.speak(
+            "I didn't quite catch that. Please say yes when you are ready to begin.",
+            onComplete: () => _listenForReadiness(),
+          );
         }
       },
       onListeningChanged: (isListening) {
@@ -119,12 +146,17 @@ class ExamProvider with ChangeNotifier {
       },
       onError: () {
         debugPrint('ExamProvider: Readiness check failed or timed out.');
-        _voiceService.speak("I didn't hear you. Please say yes when you are ready to begin.", onComplete: () => _listenForReadiness());
+        _voiceService.speak(
+          "I didn't hear you. Please say yes when you are ready to begin.",
+          onComplete: () => _listenForReadiness(),
+        );
       },
     );
   }
 
+
   Future<void> _readQuestion() async {
+    debugPrint('ExamProvider: _readQuestion() called for index $_currentQuestionIndex');
     final question = currentQuestion;
     if (question == null) {
       debugPrint('ExamProvider: Error - currentQuestion is null at index $_currentQuestionIndex');
@@ -132,6 +164,7 @@ class ExamProvider with ChangeNotifier {
     }
 
     _setAuraState(AuraState.aiSpeaking);
+    _currentSessionType = ExamSession.question;
     
     // Professional header
     String speechText = "Question ${_currentQuestionIndex + 1}. ";
@@ -159,14 +192,40 @@ class ExamProvider with ChangeNotifier {
   }
 
   Future<void> startListening() async {
-    if (_voiceService.isSpeaking) {
-      debugPrint('ExamProvider: Ignoring startListening - AI is speaking');
+    if (_voiceService.isSpeaking || _isTransitioning) {
+      debugPrint('ExamProvider: Ignoring manual startListening - proctor is busy');
       return;
     }
+
+    debugPrint('ExamProvider: Manual startListening called for session $_currentSessionType');
     
+    switch (_currentSessionType) {
+      case ExamSession.readiness:
+        _listenForReadiness();
+        break;
+      case ExamSession.question:
+        _listenForQuestionAnswer();
+        break;
+      case ExamSession.confirmation:
+        // Attempt to resume confirmation if we have a transcript
+        if (_liveTranscript.isNotEmpty) {
+          _listenForConfirmation(_liveTranscript);
+        } else {
+          _listenForQuestionAnswer();
+        }
+        break;
+      case ExamSession.none:
+        _listenForReadiness();
+        break;
+    }
+  }
+
+  Future<void> _listenForQuestionAnswer() async {
     _setAuraState(AuraState.studentSpeaking);
+    _currentSessionType = ExamSession.question;
     await _voiceService.listen(
       onResult: (transcript, confidence) {
+        if (_isTransitioning || _currentSessionType != ExamSession.question) return;
         String command = _normalizeCommand(transcript);
         if (_handleGlobalCommands(command)) return;
 
@@ -193,11 +252,8 @@ class ExamProvider with ChangeNotifier {
         if (!isListening && _auraState == AuraState.studentSpeaking) _setAuraState(AuraState.idle);
       },
       onError: () {
-        debugPrint('ExamProvider: Main listening failed or timed out.');
-        _voiceService.speak(
-          "I'm sorry, I didn't catch that. Could you please state your answer again?", 
-          onComplete: () => startListening()
-        );
+        debugPrint('ExamProvider: Question answer failed or timed out.');
+        _voiceService.speak("I didn't hear your answer. Please say it again.", onComplete: () => _listenForQuestionAnswer());
       },
     );
   }
@@ -215,10 +271,12 @@ class ExamProvider with ChangeNotifier {
   }
 
   Future<void> _listenForConfirmation(String originalTranscript) async {
-    if (_voiceService.isSpeaking) return;
+    if (_voiceService.isSpeaking || _isTransitioning) return;
+    _currentSessionType = ExamSession.confirmation;
     _setAuraState(AuraState.studentSpeaking);
     await _voiceService.listen(
       onResult: (transcript, confidence) {
+        if (_isTransitioning || _currentSessionType != ExamSession.confirmation) return;
         final command = _normalizeCommand(transcript);
         if (_handleGlobalCommands(command)) return;
 
@@ -251,6 +309,8 @@ class ExamProvider with ChangeNotifier {
   }
 
   Future<void> _processAnswer(String transcript) async {
+    if (_isTransitioning) return;
+    _isTransitioning = true;
     _setAuraState(AuraState.processing);
     final result = await _gradingService.gradeAnswer(currentQuestion!, transcript);
     
@@ -262,7 +322,10 @@ class ExamProvider with ChangeNotifier {
       Vibration.vibrate(pattern: [0, 200, 100, 200]);
     }
     
-    await _voiceService.speak(result.feedback, onComplete: () => _nextQuestion());
+    await _voiceService.speak(result.feedback, onComplete: () {
+      _isTransitioning = false;
+      _nextQuestion();
+    });
 
     // Save answer
     final answer = Answer(

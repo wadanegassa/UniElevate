@@ -5,3 +5,10 @@ enum AuraState {
   processing,
   zenBreathing,
 }
+
+enum ExamSession {
+  none,
+  readiness,
+  question,
+  confirmation,
+}
