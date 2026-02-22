@@ -53,7 +53,7 @@ const MonitoringPage = () => {
     const fetchExams = async () => {
         const { data } = await supabase
             .from('exams')
-            .select('*')
+            .select('*, questions(*)')
             .order('created_at', { ascending: false });
 
         if (data) {
@@ -196,7 +196,7 @@ const MonitoringPage = () => {
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
                                                 <div style={{ textAlign: 'right' }}>
                                                     <p style={{ fontSize: '10px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Current Score</p>
-                                                    <p style={{ fontSize: '20px', fontWeight: '900', color: '#6366f1' }}>{data.totalScore.toFixed(1)}</p>
+                                                    <p style={{ fontSize: '20px', fontWeight: '900', color: '#6366f1' }}>{data.totalScore.toFixed(1)} <span style={{ fontSize: '14px', color: 'gray' }}>/ {activeExam.questions?.length * 10}</span></p>
                                                 </div>
                                                 {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                                             </div>
@@ -215,23 +215,31 @@ const MonitoringPage = () => {
                                                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                                             <thead>
                                                                 <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                                                                    <th style={{ padding: '0 16px 16px 0', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'left', width: '40%' }}>Question (Original Text)</th>
-                                                                    <th style={{ padding: '0 16px 16px', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'left', width: '30%' }}>Student Transcript</th>
+                                                                    <th style={{ padding: '0 16px 16px 0', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'left', width: '30%' }}>Question (Original Text)</th>
+                                                                    <th style={{ padding: '0 16px 16px', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'left', width: '25%' }}>Student Transcript</th>
+                                                                    <th style={{ padding: '0 16px 16px', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'left', width: '25%' }}>Expected Answer</th>
                                                                     <th style={{ padding: '0 16px 16px', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'center' }}>Grade</th>
                                                                     <th style={{ padding: '0 0 16px 16px', fontSize: '11px', fontWeight: '900', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'right' }}>Points</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
                                                                 {data.responses.sort((a, b) => a.question_index - b.question_index).map((ans, ix) => {
-                                                                    const qText = activeExam.questions?.[ans.question_index]?.text || `Question ${ans.question_index + 1}`;
+                                                                    const qData = activeExam.questions?.find(q => q.id === ans.question_id);
+                                                                    const qText = qData?.text || `Question ${ans.question_index + 1}`;
+
+                                                                    let expectedStr = qData?.correct_answer || qData?.keywords?.join(", ") || "N/A";
+
                                                                     return (
                                                                         <tr key={ans.id} style={{ borderBottom: ix < data.responses.length - 1 ? '1px solid #e5e7eb' : 'none' }}>
                                                                             <td style={{ padding: '16px 16px 16px 0', verticalAlign: 'top' }}>
-                                                                                <span style={{ fontSize: '11px', fontWeight: '900', color: '#6366f1', display: 'block', marginBottom: '4px' }}>Q{ans.question_index + 1}</span>
+                                                                                <span style={{ fontSize: '11px', fontWeight: '900', color: '#6366f1', display: 'block', marginBottom: '4px' }}>{qData?.type === 'MCQ' ? 'MCQ ' : 'THEORY '}{ans.question_index ? `Q${ans.question_index + 1}` : ''}</span>
                                                                                 <p style={{ fontSize: '13px', fontWeight: '600', color: '#374151', lineHeight: '1.4' }}>{qText}</p>
                                                                             </td>
                                                                             <td style={{ padding: '16px', verticalAlign: 'top' }}>
                                                                                 <p style={{ fontSize: '14px', fontWeight: '500', color: '#000000', fontStyle: 'italic' }}>"{ans.transcript}"</p>
+                                                                            </td>
+                                                                            <td style={{ padding: '16px', verticalAlign: 'top' }}>
+                                                                                <p style={{ fontSize: '13px', fontWeight: '600', color: '#10b981' }}>{expectedStr}</p>
                                                                             </td>
                                                                             <td style={{ padding: '16px', verticalAlign: 'top', textAlign: 'center' }}>
                                                                                 <span style={{
@@ -245,8 +253,8 @@ const MonitoringPage = () => {
                                                                                     {ans.is_correct ? 'Correct' : 'Incorrect'}
                                                                                 </span>
                                                                             </td>
-                                                                            <td style={{ padding: '16px 0 16px 16px', verticalAlign: 'top', textAlign: 'right', fontWeight: '900', fontSize: '16px' }}>
-                                                                                {ans.score.toFixed(1)}
+                                                                            <td style={{ padding: '16px 0 16px 16px', verticalAlign: 'top', textAlign: 'right', fontWeight: '900', fontSize: '16px', whiteSpace: 'nowrap' }}>
+                                                                                {ans.score.toFixed(1)} <span style={{ fontSize: '12px', color: 'gray', fontWeight: 'normal' }}>/ 10</span>
                                                                             </td>
                                                                         </tr>
                                                                     );
