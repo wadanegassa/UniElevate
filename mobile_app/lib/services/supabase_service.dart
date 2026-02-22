@@ -7,46 +7,64 @@ import '../models/answer_model.dart';
 class SupabaseService {
   final SupabaseClient _client = Supabase.instance.client;
 
-  Future<Exam?> fetchLatestExam() async {
+  Future<Exam?> fetchActiveExam() async {
     try {
-      debugPrint('SupabaseService: Fetching latest exam for mobile client...');
+      debugPrint('SupabaseService: Fetching active exam for mobile client...');
       
-      // Use standard select without maybeSingle to catch empty list explicitly
       final response = await _client
           .from('exams')
           .select()
-          .order('created_at', ascending: false)
-          .limit(1);
+          .eq('is_active', true)
+          .maybeSingle();
 
-      if (response == null || (response as List).isEmpty) {
-        debugPrint('SupabaseService: No exams found in the database.');
+      if (response == null) {
+        debugPrint('SupabaseService: No active exam found.');
         return null;
       }
 
-      final examData = response.first as Map<String, dynamic>;
-      debugPrint('SupabaseService: Found exam: ${examData['title']} (Access Code: ${examData['access_code']})');
+      final examData = response;
+      debugPrint('SupabaseService: Found active exam: ${examData['title']}');
 
-      // Fetch questions with specific ordering if available
+      // Fetch questions
       final questionsResponse = await _client
           .from('questions')
           .select()
           .eq('exam_id', examData['id']);
 
-      if (questionsResponse == null) {
-        debugPrint('SupabaseService: Questions fetch returned null for exam ${examData['id']}');
-        return Exam.fromJson(examData, questions: []);
-      }
-
       final List<Question> questions = (questionsResponse as List)
           .map((q) => Question.fromJson(q))
           .toList();
 
-      debugPrint('SupabaseService: Successfully loaded exam with ${questions.length} questions.');
       return Exam.fromJson(examData, questions: questions);
-    } catch (e, stack) {
-      debugPrint('SupabaseService: EXCEPTION during fetchLatestExam: $e');
-      debugPrint('Stacktrace: $stack');
-      rethrow; // Propagate up to AuthProvider/ExamProvider
+    } catch (e) {
+      debugPrint('SupabaseService: Error fetching active exam: $e');
+      rethrow;
+    }
+  }
+
+  Future<bool> isStudentRegistered(String email) async {
+    try {
+      // 1. Check student_registry (pre-approved)
+      final registryResponse = await _client
+          .from('student_registry')
+          .select('email')
+          .eq('email', email)
+          .maybeSingle();
+      
+      if (registryResponse != null) return true;
+
+      // 2. Or check if already have a profile (already auto-provisioned)
+      final profileResponse = await _client
+          .from('profiles')
+          .select('id')
+          .eq('email', email)
+          .eq('role', 'student')
+          .maybeSingle();
+      
+      return profileResponse != null;
+    } catch (e) {
+      debugPrint('SupabaseService: Error checking registration: $e');
+      return false;
     }
   }
 

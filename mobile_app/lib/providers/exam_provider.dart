@@ -9,6 +9,8 @@ import '../services/supabase_service.dart';
 import '../services/voice_service.dart';
 import '../services/grading_service.dart';
 
+import '../services/voice_utils.dart';
+
 class ExamProvider with ChangeNotifier {
   final SupabaseService _supabaseService = SupabaseService();
   final VoiceService _voiceService = VoiceService();
@@ -22,6 +24,7 @@ class ExamProvider with ChangeNotifier {
   String _liveTranscript = "";
   bool _isFinished = false;
   String? _studentId;
+  VoidCallback? _onLogout;
 
   Exam? get currentExam => _currentExam;
   Question? get currentQuestion => _currentExam != null && _currentQuestionIndex < _currentExam!.questions.length 
@@ -34,10 +37,12 @@ class ExamProvider with ChangeNotifier {
 
   ExamProvider({required String geminiApiKey}) : _gradingService = GradingService(apiKey: geminiApiKey);
 
-  Future<void> startExam({String? studentId}) async {
+  Future<void> startExam({String? studentId, VoidCallback? onLogout}) async {
     _studentId = studentId;
+    _onLogout = onLogout;
     debugPrint('ExamProvider: startExam called for student $studentId');
-    _currentExam = await _supabaseService.fetchLatestExam();
+    final fetchedExam = await _supabaseService.fetchActiveExam();
+    _currentExam = fetchedExam;
     notifyListeners();
     
     if (_currentExam != null) {
@@ -55,7 +60,7 @@ class ExamProvider with ChangeNotifier {
     _examTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_remainingSeconds > 0) {
         _remainingSeconds--;
-        if (_remainingSeconds % 600 == 0 && _remainingSeconds != 0) {
+        if (_remainingSeconds % 300 == 0 && _remainingSeconds != 0) {
           _announceTimeLeft();
         }
         notifyListeners();
@@ -79,48 +84,7 @@ class ExamProvider with ChangeNotifier {
   }
 
   String _normalizeCommand(String text) {
-    final lower = text.toLowerCase().trim();
-    debugPrint('ExamProvider: Normalizing text: "$lower"');
-    
-    if (lower.contains("yes") || 
-        lower.contains("yeah") || 
-        lower.contains("yep") || 
-        lower.contains("sure") || 
-        lower.contains("correct") || 
-        lower.contains("ready") ||
-        lower.contains("begin") ||
-        lower.contains("let's go") ||
-        lower.contains("start") ||
-        lower.contains("ok") ||
-        lower.contains("okay") ||
-        lower.contains("i am ready") ||
-        lower.contains("i'm ready") ||
-        lower.contains("proceed") ||
-        lower.contains("go ahead")) return "yes";
-        
-    if (lower.contains("no") || 
-        lower.contains("nope") || 
-        lower.contains("wrong") || 
-        lower.contains("stop") ||
-        lower.contains("wait") ||
-        lower.contains("try again")) return "no";
-        
-    if (lower.contains("repeat") || 
-        lower.contains("read again") || 
-        lower.contains("one more time")) return "repeat";
-        
-    if (lower.contains("next") || 
-        lower.contains("skip")) return "next";
-    
-    // Strict MCQ parsing: Check for single letters A-E
-    final mcqMatch = RegExp(r'\b[a-e]\b').firstMatch(lower);
-    if (mcqMatch != null) {
-      final letter = mcqMatch.group(0)!.toUpperCase();
-      debugPrint('ExamProvider: Detected MCQ Option $letter');
-      return letter;
-    }
-    
-    return lower;
+    return VoiceUtils.normalizeCommand(text);
   }
 
   bool _handleGlobalCommands(String command) {
@@ -136,16 +100,17 @@ class ExamProvider with ChangeNotifier {
   }
 
   Future<void> _listenForReadiness() async {
+    if (_voiceService.isSpeaking) return;
     _setAuraState(AuraState.studentSpeaking);
     await _voiceService.listen(
-      onResult: (transcript) {
+      onResult: (transcript, confidence) {
         final command = _normalizeCommand(transcript);
         if (_handleGlobalCommands(command)) return;
 
         if (command == "yes") {
           _readQuestion();
         } else {
-          debugPrint('ExamProvider: Transcript did not match "yes": $transcript');
+          debugPrint('ExamProvider: Transcript did not match "yes": $transcript (conf: $confidence)');
           _voiceService.speak("I didn't quite catch that. Please say yes when you are ready to begin.", onComplete: () => _listenForReadiness());
         }
       },
@@ -160,30 +125,32 @@ class ExamProvider with ChangeNotifier {
   }
 
   Future<void> _readQuestion() async {
-    debugPrint('ExamProvider: _readQuestion called. Index: $_currentQuestionIndex');
-    if (currentQuestion == null) {
+    final question = currentQuestion;
+    if (question == null) {
       debugPrint('ExamProvider: Error - currentQuestion is null at index $_currentQuestionIndex');
       return;
     }
-    
+
     _setAuraState(AuraState.aiSpeaking);
-    String text = "Question ${_currentQuestionIndex + 1}. ${currentQuestion!.text}";
     
-    if (currentQuestion!.type == QuestionType.mcq && currentQuestion!.options != null) {
-      text += ". The options are: ";
-      final options = currentQuestion!.options!;
-      for (int i = 0; i < options.length; i++) {
-        String letter = String.fromCharCode(65 + i); // 65 is 'A'
-        text += "Option $letter: ${options[i]}. ";
+    // Professional header
+    String speechText = "Question ${_currentQuestionIndex + 1}. ";
+    
+    // Differentiate types
+    if (question.type == QuestionType.mcq) {
+      speechText += "Multiple Choice. ${question.text}. The options are: ";
+      if (question.options != null) {
+        for (int i = 0; i < question.options!.length; i++) {
+          final letter = String.fromCharCode(65 + i);
+          speechText += "Option $letter: ${question.options![i]}. ";
+        }
       }
-      text += ". Please say the letter of your choice.";
+      speechText += "Please state your choice.";
+    } else {
+      speechText += "Theory Question. ${question.text}. You may provide your explanation now.";
     }
-    
-    debugPrint('ExamProvider: Speaking question text: "$text"');
-    await _voiceService.speak(text, onComplete: () {
-      debugPrint('ExamProvider: Finished speaking question. Starting to listen...');
-      startListening();
-    });
+
+    await _voiceService.speak(speechText, onComplete: () => startListening());
   }
 
   Future<void> repeatQuestion() async {
@@ -192,22 +159,45 @@ class ExamProvider with ChangeNotifier {
   }
 
   Future<void> startListening() async {
+    if (_voiceService.isSpeaking) {
+      debugPrint('ExamProvider: Ignoring startListening - AI is speaking');
+      return;
+    }
+    
     _setAuraState(AuraState.studentSpeaking);
     await _voiceService.listen(
-      onResult: (transcript) {
-        final command = _normalizeCommand(transcript);
+      onResult: (transcript, confidence) {
+        String command = _normalizeCommand(transcript);
         if (_handleGlobalCommands(command)) return;
+
+        // Special handling for MCQ: try to match spoken text to option content
+        if (currentQuestion?.type == QuestionType.mcq && currentQuestion?.options != null) {
+          final matchedLetter = VoiceUtils.matchOption(transcript, currentQuestion!.options!);
+          if (matchedLetter != null) {
+            command = matchedLetter;
+          }
+        }
 
         _liveTranscript = transcript;
         notifyListeners();
-        _confirmAnswer(command.length == 1 ? command : transcript);
+
+        // SMART CONFIRMATION: Skip confirmation if confidence is very high
+        if (confidence > 0.95) {
+          debugPrint('ExamProvider: High confidence ($confidence), skipping confirmation.');
+          _processAnswer(command.length == 1 ? command : transcript);
+        } else {
+          _confirmAnswer(command.length == 1 ? command : transcript);
+        }
       },
       onListeningChanged: (isListening) {
         if (!isListening && _auraState == AuraState.studentSpeaking) _setAuraState(AuraState.idle);
       },
       onError: () {
         debugPrint('ExamProvider: Main listening failed or timed out.');
-        _voiceService.speak("I didn't quite get that. Could you please repeat your answer?", onComplete: () => startListening());
+        _voiceService.speak(
+          "I'm sorry, I didn't catch that. Could you please state your answer again?", 
+          onComplete: () => startListening()
+        );
       },
     );
   }
@@ -225,16 +215,29 @@ class ExamProvider with ChangeNotifier {
   }
 
   Future<void> _listenForConfirmation(String originalTranscript) async {
+    if (_voiceService.isSpeaking) return;
     _setAuraState(AuraState.studentSpeaking);
     await _voiceService.listen(
-      onResult: (transcript) {
+      onResult: (transcript, confidence) {
         final command = _normalizeCommand(transcript);
         if (_handleGlobalCommands(command)) return;
 
         if (command == "yes") {
           _processAnswer(originalTranscript);
         } else {
-          _voiceService.speak("Okay, please tell me your answer again.", onComplete: () => startListening());
+          // Check if they provided a new answer in the "no" response
+          // e.g., "No, I meant Option B" or "No, it is Berlin"
+          String? correctedAnswer;
+          if (currentQuestion?.type == QuestionType.mcq && currentQuestion?.options != null) {
+            correctedAnswer = VoiceUtils.matchOption(transcript, currentQuestion!.options!);
+          }
+          
+          if (correctedAnswer != null) {
+            debugPrint('ExamProvider: Detected self-correction: $correctedAnswer');
+            _confirmAnswer(correctedAnswer);
+          } else {
+            _voiceService.speak("Okay, please tell me your answer again.", onComplete: () => startListening());
+          }
         }
       },
       onListeningChanged: (isListening) {
@@ -292,6 +295,12 @@ class ExamProvider with ChangeNotifier {
     await _voiceService.speak("Congratulations! You have completed the exam. Well done for your hard work.");
     _setAuraState(AuraState.idle);
     notifyListeners();
+    
+    // Auto-logout after a short delay to allow the voice to finish
+    await Future.delayed(const Duration(seconds: 2));
+    if (_onLogout != null) {
+      _onLogout!();
+    }
   }
 
   void _setAuraState(AuraState state) {

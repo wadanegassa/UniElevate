@@ -21,36 +21,40 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      // 1. Fetch latest exam to validate the access command
+      // 1. Strict Registration Check
+      final isRegistered = await _supabaseService.isStudentRegistered(email);
+      if (!isRegistered) {
+        _error = "Access Denied: You are not registered for this exam portal. Please contact your supervisor.";
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      // 2. Fetch Active Exam
       Exam? exam;
       try {
-        exam = await _supabaseService.fetchLatestExam();
+        exam = await _supabaseService.fetchActiveExam();
       } catch (dbError) {
-        _error = "Database Connection Error: ${dbError.toString()}";
+        _error = "Database Connection Error. Please try again.";
         _isLoading = false;
         notifyListeners();
         return false;
       }
 
       if (exam == null) {
-        _error = "No active exam found. Please ask your supervisor to deploy an exam first.";
+        _error = "No exam is currently active. Please wait for your supervisor to activate the session.";
         _isLoading = false;
         notifyListeners();
         return false;
       }
 
-      // 2. Validate the access command — this is the ONLY gate.
-      // Normalize both sides: strip all spaces, underscores, and hyphens so that
-      // voice-spoken "START NOW" matches a stored code of "START_NOW".
-      String _normalize(String s) => s.trim().toUpperCase().replaceAll(RegExp(r'[\s_\-]+'), '');
-
-      final expected = _normalize(exam.accessCode ?? "");
-      final received = _normalize(password);
-
-      debugPrint('AuthProvider: Access command check — expected: "$expected", received: "$received"');
+      // 3. Validate the access command
+      String normalize(String s) => s.trim().toUpperCase().replaceAll(RegExp(r'[\s_\-]+'), '');
+      final expected = normalize(exam.accessCode ?? "");
+      final received = normalize(password);
 
       if (received != expected || expected.isEmpty) {
-        _error = "Invalid Access Command. Please check the command and try again.";
+        _error = "Invalid Access Command. Please check the command provided by your proctor.";
         _isLoading = false;
         notifyListeners();
         return false;
@@ -92,13 +96,17 @@ class AuthProvider with ChangeNotifier {
         }
       }
 
-      if (response != null && response.user != null) {
-        debugPrint('AuthProvider: Login successful for ${response.user!.id}. Syncing profile...');
+      if (response.user != null) {
+        _user = response.user; // Set _user here
+      }
+
+      if (_user != null) {
+        debugPrint('AuthProvider: Login successful for ${_user!.id}. Syncing profile...');
         
         // 5. Device Binding Logic (with retry and auto-healing)
         Map<String, dynamic>? profile;
         try {
-          profile = await _lookupProfile(response.user!.id);
+          profile = await _lookupProfile(_user!.id);
           debugPrint('AuthProvider: Initial profile lookup result: $profile');
         } catch (e) {
           debugPrint('AuthProvider: Initial lookup FAILED with error: $e');

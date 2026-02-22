@@ -21,7 +21,15 @@ class _ExamScreenState extends State<ExamScreen> {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final examProvider = Provider.of<ExamProvider>(context, listen: false);
       if (authProvider.user != null) {
-        examProvider.startExam(studentId: authProvider.user!.id);
+        examProvider.startExam(
+          studentId: authProvider.user!.id,
+          onLogout: () {
+            authProvider.logout();
+            if (mounted) {
+              Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+            }
+          },
+        );
       }
     });
   }
@@ -41,6 +49,24 @@ class _ExamScreenState extends State<ExamScreen> {
         },
         child: Stack(
           children: [
+            // Floating particles background (Cool factor)
+            ...List.generate(15, (i) => Positioned(
+              top: (i * 123) % 800 + 0.0,
+              left: (i * 57) % 400 + 0.0,
+              child: Opacity(
+                opacity: 0.1,
+                child: Container(
+                  width: 2,
+                  height: 2,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: Colors.white, blurRadius: 4, spreadRadius: 1)],
+                  ),
+                ),
+              ),
+            )),
+
             // Background elements
             Positioned(
               top: 60,

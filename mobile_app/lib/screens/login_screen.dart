@@ -5,6 +5,7 @@ import '../services/voice_service.dart';
 import '../models/aura_state.dart';
 import '../widgets/aura_orb.dart';
 import 'exam_screen.dart';
+import '../services/voice_utils.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -32,9 +33,23 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
 
   Future<void> _welcomeVoice() async {
     if (!mounted) return;
+    
+    // 1. Initial Greeting
     setState(() => _auraState = AuraState.aiSpeaking);
     await _voiceService.speak(
-      "Welcome to Uni Elevate. I am your digital proctor. Please enter your email and access command to enter the exam portal, or tap the screen for voice assistance.",
+      "Welcome to Uni Elevate. Before we begin, let's take a deep breath together.",
+    );
+
+    // 2. Breathing Sequence
+    if (!mounted) return;
+    setState(() => _auraState = AuraState.zenBreathing);
+    await Future.delayed(const Duration(seconds: 4)); // 4 seconds for the breath
+
+    // 3. Instructions
+    if (!mounted) return;
+    setState(() => _auraState = AuraState.aiSpeaking);
+    await _voiceService.speak(
+      "I am your digital proctor. Please enter your email and access command to enter the exam portal, or tap the screen for voice assistance.",
       onComplete: () {
         if (!mounted) return;
         setState(() => _auraState = AuraState.idle);
@@ -53,10 +68,10 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     if (!mounted) return;
     setState(() => _auraState = AuraState.studentSpeaking);
     await _voiceService.listen(
-      onResult: (email) {
+      onResult: (email, confidence) {
         if (!mounted) return;
         setState(() {
-          _emailController.text = email.replaceAll(" at ", "@").replaceAll(" dot ", ".").trim().toLowerCase();
+          _emailController.text = VoiceUtils.normalizeEmail(email);
           _auraState = AuraState.aiSpeaking;
         });
         _askForCommand();
@@ -74,10 +89,11 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     if (!mounted) return;
     setState(() => _auraState = AuraState.studentSpeaking);
     await _voiceService.listen(
-      onResult: (command) {
+      onResult: (command, confidence) {
         if (!mounted) return;
         setState(() {
-          _passwordController.text = command.trim();
+          // Normalize command to catch things like "Command is ALPHA" -> "ALPHA"
+          _passwordController.text = VoiceUtils.normalizeCommand(command).trim();
           _auraState = AuraState.processing;
         });
         _attemptLogin();

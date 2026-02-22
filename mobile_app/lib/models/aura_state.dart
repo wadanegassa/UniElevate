@@ -3,4 +3,5 @@ enum AuraState {
   aiSpeaking,
   studentSpeaking,
   processing,
+  zenBreathing,
 }
